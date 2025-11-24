@@ -104,6 +104,7 @@
                 <i id="current-shape-icon" class="fas fa-shapes"></i>
             </button>
             <div id="shape-menu" class="menu-dropdown absolute top-14 left-0 bg-slate-800/95 backdrop-blur-xl border border-slate-600 rounded-2xl p-3 w-56 shadow-2xl scale-0-opacity-0 grid grid-cols-3 gap-2">
+                <!-- 입체감이 느껴지는 아이콘들 -->
                 <button onclick="changeShape('cone')" class="shape-btn p-3 text-yellow-400"><i class="fas fa-filter transform rotate-180"></i><span class="text-[9px] text-gray-300">Cone</span></button>
                 <button onclick="changeShape('cube')" class="shape-btn p-3 text-blue-400"><i class="fas fa-cube"></i><span class="text-[9px] text-gray-300">Cube</span></button>
                 <button onclick="changeShape('sphere')" class="shape-btn p-3 text-red-400"><i class="fas fa-circle"></i><span class="text-[9px] text-gray-300">Sphere</span></button>
@@ -142,6 +143,8 @@
             <i class="fas fa-brain"></i>
         </button>
     </div>
+
+    <!-- (REMOVED) Dynamic Title -->
 
     <!-- Bottom Controls -->
     <div class="fixed bottom-10 left-0 right-0 z-50 flex justify-center items-center gap-8 pointer-events-none">
@@ -254,15 +257,44 @@
             transformControl = new THREE.TransformControls(camera, renderer.domElement);
             transformControl.addEventListener('change', () => renderer.render(scene, camera));
             transformControl.addEventListener('dragging-changed', (event) => orbitControls.enabled = !event.value);
+            
+            // [CRITICAL FIX] Set Gizmo to LOCAL space so axes rotate with the object
+            transformControl.setSpace('local');
+            
             transformControl.attach(bladeGroup);
             scene.add(transformControl);
             transformControl.addEventListener('change', syncClippingPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
+            
+            // KEYBOARD SHORTCUTS
+            window.addEventListener('keydown', onKeyDown);
         }
 
         // ---------------------------------------------------------
-        // 2. Shape & Color Logic
+        // 2. Hotkey Logic
+        // ---------------------------------------------------------
+        function onKeyDown(event) {
+            if(!document.getElementById('ai-modal').classList.contains('hidden')) {
+                if(event.key === 'Escape') document.getElementById('close-ai').click();
+                return;
+            }
+            switch(event.key.toLowerCase()) {
+                case 't': if(!isCut) document.getElementById('btn-mode-translate').click(); break;
+                case 'r': if(!isCut) document.getElementById('btn-mode-rotate').click(); break;
+                case ' ': case 'enter': document.getElementById('btn-action').click(); break;
+                case 'escape': if(isCut) document.getElementById('btn-action').click(); closeAllMenus(); break;
+                case '1': changeShape('cone'); break;
+                case '2': changeShape('cube'); break;
+                case '3': changeShape('sphere'); break;
+                case '4': changeShape('cylinder'); break;
+                case '5': changeShape('torus'); break;
+                case '6': changeShape('icosahedron'); break;
+            }
+        }
+
+        // ---------------------------------------------------------
+        // 3. Shape & Color Logic
         // ---------------------------------------------------------
         window.changeShape = function(type) {
             if(isCut) return;
@@ -298,7 +330,6 @@
         }
 
         function updateSolidShape(type) {
-            // Cleanup
             while(objectGroup.children.length > 0){ 
                 const child = objectGroup.children[0];
                 if(child.geometry) child.geometry.dispose();
@@ -309,7 +340,6 @@
 
             const geometry = getGeometry(type);
 
-            // Main Material
             const material = new THREE.MeshStandardMaterial({
                 color: currentShapeColor, 
                 emissive: new THREE.Color(currentShapeColor).multiplyScalar(0.2), 
@@ -320,11 +350,9 @@
             mesh.castShadow = true; mesh.receiveShadow = true;
             objectGroup.add(mesh);
 
-            // Stencil
             const stencilGroup = createPlaneStencilGroup(geometry, clipPlane, 1);
             objectGroup.add(stencilGroup);
 
-            // Cap
             const capMat = new THREE.MeshStandardMaterial({
                 color: currentCapColor, emissive: new THREE.Color(currentCapColor).multiplyScalar(0.2),
                 metalness: 0.1, roughness: 0.1,
@@ -335,7 +363,6 @@
             capMesh = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), capMat);
             capMesh.renderOrder = 1.1;
             
-            // Sync
             if(bladeGroup) {
                 capMesh.position.copy(bladeGroup.position);
                 capMesh.quaternion.copy(bladeGroup.quaternion);
@@ -361,7 +388,7 @@
         }
 
         // ---------------------------------------------------------
-        // 3. Scene Objects
+        // 4. Scene Objects
         // ---------------------------------------------------------
         function createBlade() {
             bladeGroup = new THREE.Group();
@@ -389,18 +416,23 @@
         }
 
         // ---------------------------------------------------------
-        // 4. Logic
+        // 5. Logic (Clipping & Sync)
         // ---------------------------------------------------------
         function syncClippingPlaneToBlade() {
             if (!bladeGroup || !clipPlane || !capMesh) return;
             bladeGroup.updateMatrixWorld();
+            // Normal Direction: Local (0, -1, 0) -> World
             const normal = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
             const point = bladeGroup.position.clone();
+            // Plane Constant: -dot(point, normal)
             const constant = -point.dot(normal);
+            
             clipPlane.normal.copy(normal);
             clipPlane.constant = constant;
+            
             capMesh.position.copy(point);
             capMesh.quaternion.copy(bladeGroup.quaternion);
+            // Align cap mesh orientation
             capMesh.lookAt(point.clone().add(normal));
         }
 
@@ -417,7 +449,7 @@
         }
 
         // ---------------------------------------------------------
-        // 5. UI Event Handlers
+        // 6. UI Event Handlers
         // ---------------------------------------------------------
         const btnShapeToggle = document.getElementById('btn-shape-toggle');
         const shapeMenu = document.getElementById('shape-menu');
@@ -458,14 +490,27 @@
         btnAction.addEventListener('click', (e) => {
             e.stopPropagation();
             if (!isCut) {
+                // [START CUT]
                 isCut = true;
                 transformControl.detach();
                 savedBladeState.position.copy(bladeGroup.position);
                 savedBladeState.quaternion.copy(bladeGroup.quaternion);
 
-                // Cut Logic: Move blade down past the object
+                // Calculate Cut Direction based on Blade's Rotation
+                // Local (0, -1, 0) is the "down" direction of the blade
+                const cutDirection = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
+                
+                // Distance to move (enough to pass through object)
+                const cutDistance = 12;
+                const targetPos = bladeGroup.position.clone().add(cutDirection.multiplyScalar(cutDistance));
+
+                // Animate along the cut direction
                 gsap.to(bladeGroup.position, {
-                    y: -4, duration: 0.6, ease: "power4.in",
+                    x: targetPos.x,
+                    y: targetPos.y,
+                    z: targetPos.z,
+                    duration: 0.6,
+                    ease: "power4.in",
                     onUpdate: syncClippingPlaneToBlade,
                     onComplete: () => {
                         btnAction.classList.remove('btn-cut');
@@ -474,6 +519,7 @@
                     }
                 });
             } else {
+                // [RESET]
                 isCut = false;
                 gsap.to(bladeGroup.position, {
                     x: savedBladeState.position.x, y: savedBladeState.position.y, z: savedBladeState.position.z,
