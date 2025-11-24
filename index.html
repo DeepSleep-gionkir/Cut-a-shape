@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Vivid Blade Slicer (Move Added)</title>
+    <title>Direct 3D Blade Slicer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -11,57 +11,59 @@
         body { 
             margin: 0; 
             overflow: hidden; 
-            background-color: #0f172a; /* Slate-900 */
+            background-color: #0f172a; 
             font-family: 'Noto Sans KR', sans-serif; 
             overscroll-behavior: none;
+            user-select: none;
         }
         #canvas-container { 
             width: 100vw; 
             height: 100vh; 
             touch-action: none; 
+            outline: none;
         }
 
-        /* 슬라이더 스타일 */
-        input[type=range] {
-            -webkit-appearance: none; 
-            width: 100%;
-            background: transparent; 
-            cursor: pointer;
-            touch-action: none;
+        /* 버튼 스타일 */
+        .glass-btn {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #22d3ee;
+            transition: all 0.2s ease;
         }
-        input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 6px;
-            background: rgba(255,255,255,0.15);
-            border-radius: 3px;
-        }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 18px;
-            width: 18px;
-            border-radius: 50%;
-            background: #22d3ee; /* Cyan-400 */
-            margin-top: -6px; 
-            box-shadow: 0 0 10px rgba(34, 211, 238, 0.5);
-            border: 2px solid #fff;
-        }
-
-        /* 액션 버튼 스타일 */
-        .action-btn {
-            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        .action-btn:active {
+        .glass-btn:active {
             transform: scale(0.95);
+            background: rgba(15, 23, 42, 0.8);
         }
         
-        /* 펄스 애니메이션 */
-        @keyframes pulse-glow {
-            0% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.7); }
-            70% { box-shadow: 0 0 0 15px rgba(34, 211, 238, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(34, 211, 238, 0); }
+        .active-mode {
+            background: rgba(34, 211, 238, 0.2);
+            border-color: #22d3ee;
+            color: white;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.3);
         }
-        .btn-pulse {
+
+        /* CUT 버튼 펄스 */
+        @keyframes pulse-glow {
+            0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
+            70% { box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+        }
+        .btn-cut {
+            background: linear-gradient(135deg, #f43f5e, #e11d48);
+            color: white;
+            box-shadow: 0 4px 15px rgba(244, 63, 94, 0.4);
             animation: pulse-glow 2s infinite;
+        }
+        .btn-reset {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+        }
+
+        /* 상단 안내 메시지 페이드 */
+        .fade-out {
+            opacity: 0;
+            transition: opacity 1s ease-out;
         }
     </style>
 </head>
@@ -70,57 +72,43 @@
     <!-- 3D 캔버스 -->
     <div id="canvas-container"></div>
 
-    <!-- 상단 타이틀 -->
-    <div class="fixed top-6 left-0 right-0 text-center pointer-events-none z-40">
-        <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-lg" style="text-shadow: 0 2px 10px rgba(0,0,0,0.5);">
-            VIVID CUT
-        </h1>
-        <p class="text-xs text-cyan-200/70 mt-1">Move & Tilt & Cut</p>
+    <!-- 상단 타이틀 & AI 버튼 -->
+    <div class="fixed top-0 left-0 right-0 p-4 flex justify-between items-start pointer-events-none z-50">
+        <button id="btn-ai" class="pointer-events-auto glass-btn w-12 h-12 rounded-xl flex items-center justify-center shadow-lg">
+            <i class="fas fa-brain text-xl"></i>
+        </button>
+        
+        <div class="text-center pointer-events-none" id="guide-msg">
+            <h1 class="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-sm">
+                VIVID CUT 3D
+            </h1>
+            <p class="text-[10px] text-cyan-200/70 mt-1">
+                화살표를 드래그하여 칼을 움직이세요
+            </p>
+        </div>
+        
+        <div class="w-12"></div> <!-- Spacer -->
     </div>
 
-    <!-- AI 분석 버튼 (좌측 상단) -->
-    <button id="btn-ai" class="fixed top-6 left-6 z-50 bg-gray-800/80 backdrop-blur-md text-cyan-400 w-12 h-12 rounded-2xl shadow-lg border border-cyan-500/30 flex items-center justify-center hover:bg-gray-700 transition-all active:scale-90">
-        <i class="fas fa-brain text-xl"></i>
-    </button>
-
-    <!-- 메인 컨트롤 바 (하단) -->
-    <div class="fixed bottom-6 left-4 right-4 z-50 flex flex-col gap-3 max-w-md mx-auto">
+    <!-- 하단 컨트롤 바 (매우 심플) -->
+    <div class="fixed bottom-8 left-0 right-0 z-50 flex justify-center items-center gap-6 pointer-events-none">
         
-        <!-- 칼 조절 슬라이더 그룹 -->
-        <div class="bg-slate-900/80 backdrop-blur-xl rounded-2xl p-4 border border-slate-700 shadow-2xl space-y-3">
-            
-            <!-- 1. 이동 (Shift/Move) - NEW -->
-            <div>
-                <div class="flex justify-between text-xs font-bold text-yellow-300 mb-1">
-                    <span>↔️ BLADE SHIFT (이동)</span>
-                    <span id="val-shift">0.0</span>
-                </div>
-                <input type="range" id="slider-shift" min="-4" max="4" step="0.1" value="0">
-            </div>
-
-            <!-- 2. 기울기 (Tilt) -->
-            <div>
-                <div class="flex justify-between text-xs font-bold text-cyan-300 mb-1">
-                    <span>🔪 BLADE TILT (기울기)</span>
-                    <span id="val-tilt">0°</span>
-                </div>
-                <input type="range" id="slider-tilt" min="0" max="90" step="1" value="0">
-            </div>
-
-            <!-- 3. 회전 (Rotate) -->
-            <div>
-                <div class="flex justify-between text-xs font-bold text-pink-300 mb-1">
-                    <span>🔄 BLADE DIR (방향)</span>
-                    <span id="val-rotate">0°</span>
-                </div>
-                <input type="range" id="slider-rotate" min="0" max="360" step="1" value="0">
-            </div>
+        <!-- 모드 변경 버튼 (이동/회전) -->
+        <div class="pointer-events-auto bg-slate-900/80 backdrop-blur-md rounded-full p-1.5 flex border border-slate-700 shadow-2xl">
+            <button id="btn-mode-translate" class="active-mode w-12 h-12 rounded-full flex items-center justify-center transition-all">
+                <i class="fas fa-arrows-alt"></i>
+            </button>
+            <button id="btn-mode-rotate" class="w-12 h-12 rounded-full text-slate-400 flex items-center justify-center transition-all hover:text-white">
+                <i class="fas fa-sync-alt"></i>
+            </button>
         </div>
 
         <!-- 자르기 액션 버튼 -->
-        <button id="btn-action" class="action-btn btn-pulse w-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black text-xl py-3.5 rounded-2xl shadow-[0_0_20px_rgba(6,182,212,0.5)] border-t border-white/20 flex items-center justify-center gap-3">
-            <i class="fas fa-cut"></i> CUT !
+        <button id="btn-action" class="pointer-events-auto btn-cut w-20 h-20 rounded-full flex flex-col items-center justify-center font-black text-sm shadow-2xl border-4 border-slate-900 active:scale-90 transition-transform">
+            <i class="fas fa-cut text-xl mb-1"></i>
+            CUT
         </button>
+
     </div>
 
     <!-- AI 결과 모달 -->
@@ -137,37 +125,38 @@
     <!-- 로딩 인디케이터 -->
     <div id="loading-overlay" class="hidden fixed inset-0 bg-black/80 z-[80] flex flex-col items-center justify-center text-white backdrop-blur-sm">
         <div class="animate-spin rounded-full h-14 w-14 border-4 border-t-cyan-500 border-slate-700 mb-4"></div>
-        <p class="text-lg font-bold animate-pulse text-cyan-400">AI Calculating...</p>
+        <p class="text-lg font-bold animate-pulse text-cyan-400">Thinking...</p>
     </div>
 
     <!-- Three.js Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <!-- GSAP for Animation -->
+    <!-- TransformControls (핵심: 3D 조작 기즈모) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 
     <script>
         // ---------------------------------------------------------
-        // 1. Global Setup
+        // 1. Setup
         // ---------------------------------------------------------
         const apiKey = ""; 
         
-        let scene, camera, renderer, controls;
+        let scene, camera, renderer, orbitControls, transformControl;
         let objectGroup, bladeGroup;
         let clipPlane, capMesh;
         
         let isCut = false;
-        const bladeStartHeight = 7.0; 
-        const bladeCutHeight = 0;     
+        
+        // 자르기 전 칼의 위치/회전을 기억하기 위한 변수
+        let savedBladeState = {
+            position: new THREE.Vector3(0, 6, 0),
+            quaternion: new THREE.Quaternion()
+        };
 
-        // 도형 및 칼 설정값
         const params = {
             radiusTop: 2.5,
             radiusBottom: 4.5,
             height: 6.0,
-            shift: 0,   // 이동 (좌우 offset)
-            tilt: 0,    // 기울기
-            rotate: 0   // 회전
         };
 
         init();
@@ -176,12 +165,12 @@
         function init() {
             // Scene
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x0f172a); // Slate 900
+            scene.background = new THREE.Color(0x0f172a); 
             scene.fog = new THREE.FogExp2(0x0f172a, 0.02);
 
             // Camera
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 12, 20);
+            camera.position.set(0, 10, 18);
             camera.lookAt(0, 0, 0);
 
             // Renderer
@@ -194,92 +183,88 @@
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // Lights
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambientLight);
-
             const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
             mainLight.position.set(10, 20, 10);
             mainLight.castShadow = true;
             mainLight.shadow.mapSize.set(2048, 2048);
-            mainLight.shadow.bias = -0.0001;
             scene.add(mainLight);
-
             const rimLight = new THREE.SpotLight(0x22d3ee, 2.0); 
             rimLight.position.set(-10, 10, -10);
-            rimLight.lookAt(0,0,0);
             scene.add(rimLight);
 
-            // 1. Clipping Plane (Initial: normal pointing down)
-            clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), bladeStartHeight);
-
-            // 2. Object (Cone)
+            // 1. Clipping Plane & Object
+            clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 6);
             objectGroup = new THREE.Group();
             scene.add(objectGroup);
             createSolidCone();
 
-            // 3. Blade Visual
+            // 2. Blade & Floor
             createBlade();
-
-            // 4. Floor
             createFloor();
 
-            // Controls
-            controls = new THREE.OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
-            controls.maxPolarAngle = Math.PI / 2 - 0.1; 
+            // 3. Controls
+            // Orbit Controls (Camera)
+            orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+            orbitControls.enableDamping = true;
+            orbitControls.dampingFactor = 0.05;
+            orbitControls.maxPolarAngle = Math.PI / 2 - 0.1;
+
+            // Transform Controls (Blade Manipulation - NEW)
+            transformControl = new THREE.TransformControls(camera, renderer.domElement);
+            transformControl.addEventListener('change', () => renderer.render(scene, camera)); // 렌더링 갱신
+            transformControl.addEventListener('dragging-changed', function (event) {
+                // 드래그 중에는 카메라 회전 비활성화
+                orbitControls.enabled = !event.value;
+            });
+            
+            // 칼 그룹에 컨트롤 부착
+            transformControl.attach(bladeGroup);
+            scene.add(transformControl);
+
+            // 드래그 중에 실시간으로 Clipping Plane 업데이트
+            transformControl.addEventListener('change', syncClippingPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
+
+            // 안내 메시지 3초 뒤 페이드 아웃
+            setTimeout(() => {
+                const guide = document.getElementById('guide-msg');
+                if(guide) guide.classList.add('fade-out');
+            }, 4000);
         }
 
         // ---------------------------------------------------------
-        // 2. Object Creation
+        // 2. Object & Blade Logic
         // ---------------------------------------------------------
         function createSolidCone() {
-            const geometry = new THREE.CylinderGeometry(
-                params.radiusTop, params.radiusBottom, params.height, 
-                64, 1, false
-            );
-
-            // Vivid Exterior (Cyan)
+            const geometry = new THREE.CylinderGeometry(params.radiusTop, params.radiusBottom, params.height, 64, 1, false);
+            
+            // Cyan Exterior
             const material = new THREE.MeshStandardMaterial({
-                color: 0x06b6d4, 
-                emissive: 0x083344,
-                roughness: 0.2,
-                metalness: 0.6,
-                clippingPlanes: [clipPlane],
-                clipShadows: true,
-                side: THREE.FrontSide,
+                color: 0x06b6d4, emissive: 0x083344, roughness: 0.2, metalness: 0.6,
+                clippingPlanes: [clipPlane], clipShadows: true, side: THREE.FrontSide,
             });
-
             const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
+            mesh.castShadow = true; mesh.receiveShadow = true;
             objectGroup.add(mesh);
 
-            // Stencil Logic for Cap
+            // Stencil Cap
             const stencilGroup = createPlaneStencilGroup(geometry, clipPlane, 1);
             objectGroup.add(stencilGroup);
 
-            // Cap Material (Hot Pink)
+            // Pink Cap
             const capMat = new THREE.MeshStandardMaterial({
-                color: 0xf43f5e, 
-                emissive: 0x881337,
-                metalness: 0.1,
-                roughness: 0.1,
-                stencilWrite: true,
-                stencilRef: 1,
-                stencilFunc: THREE.EqualStencilFunc,
-                stencilFail: THREE.KeepStencilOp,
-                stencilZFail: THREE.KeepStencilOp,
-                stencilZPass: THREE.KeepStencilOp,
-                side: THREE.DoubleSide
+                color: 0xf43f5e, emissive: 0x881337, metalness: 0.1, roughness: 0.1,
+                stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc,
+                stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp,
+                stencilZPass: THREE.KeepStencilOp, side: THREE.DoubleSide
             });
-
             const capGeo = new THREE.PlaneGeometry(40, 40);
             capMesh = new THREE.Mesh(capGeo, capMat);
             capMesh.renderOrder = 1.1;
-            scene.add(capMesh); 
+            scene.add(capMesh);
         }
 
         function createPlaneStencilGroup(geometry, plane, renderOrder) {
@@ -288,58 +273,32 @@
                 depthWrite: false, depthTest: false, colorWrite: false,
                 stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc,
             });
+            const mat0 = baseMat.clone(); mat0.side = THREE.BackSide; mat0.clippingPlanes = [plane];
+            mat0.stencilFail = THREE.IncrementWrapStencilOp; mat0.stencilZFail = THREE.IncrementWrapStencilOp; mat0.stencilZPass = THREE.IncrementWrapStencilOp;
+            group.add(new THREE.Mesh(geometry, mat0));
 
-            // Back faces
-            const mat0 = baseMat.clone();
-            mat0.side = THREE.BackSide;
-            mat0.clippingPlanes = [plane];
-            mat0.stencilFail = THREE.IncrementWrapStencilOp;
-            mat0.stencilZFail = THREE.IncrementWrapStencilOp;
-            mat0.stencilZPass = THREE.IncrementWrapStencilOp;
-            const mesh0 = new THREE.Mesh(geometry, mat0);
-            mesh0.renderOrder = renderOrder;
-            group.add(mesh0);
-
-            // Front faces
-            const mat1 = baseMat.clone();
-            mat1.side = THREE.FrontSide;
-            mat1.clippingPlanes = [plane];
-            mat1.stencilFail = THREE.DecrementWrapStencilOp;
-            mat1.stencilZFail = THREE.DecrementWrapStencilOp;
-            mat1.stencilZPass = THREE.DecrementWrapStencilOp;
-            const mesh1 = new THREE.Mesh(geometry, mat1);
-            mesh1.renderOrder = renderOrder;
-            group.add(mesh1);
-
+            const mat1 = baseMat.clone(); mat1.side = THREE.FrontSide; mat1.clippingPlanes = [plane];
+            mat1.stencilFail = THREE.DecrementWrapStencilOp; mat1.stencilZFail = THREE.DecrementWrapStencilOp; mat1.stencilZPass = THREE.DecrementWrapStencilOp;
+            group.add(new THREE.Mesh(geometry, mat1));
             return group;
         }
 
         function createBlade() {
             bladeGroup = new THREE.Group();
-            bladeGroup.position.y = bladeStartHeight; 
+            // Initial Position
+            bladeGroup.position.set(0, 6, 0);
 
-            // Blade Geometry (Large thin box)
-            const bladeGeo = new THREE.BoxGeometry(14, 0.1, 14);
-            
-            // Blade Material (Semi-transparent)
+            const bladeGeo = new THREE.BoxGeometry(12, 0.1, 12);
             const bladeMat = new THREE.MeshPhysicalMaterial({
-                color: 0xffffff,
-                metalness: 0.9,
-                roughness: 0.0,
-                transmission: 0.3, 
-                transparent: true,
-                opacity: 0.7,
-                side: THREE.DoubleSide
+                color: 0xffffff, metalness: 0.9, roughness: 0.0, transmission: 0.3,
+                transparent: true, opacity: 0.7, side: THREE.DoubleSide
             });
-
             const bladeMesh = new THREE.Mesh(bladeGeo, bladeMat);
-            bladeMesh.castShadow = true;
             
-            // Glowing Edge
+            // Edge Glow
             const edges = new THREE.EdgesGeometry(bladeGeo);
             const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x22d3ee }));
             bladeMesh.add(line);
-
             bladeGroup.add(bladeMesh);
             scene.add(bladeGroup);
         }
@@ -347,63 +306,36 @@
         function createFloor() {
             const grid = new THREE.GridHelper(50, 50, 0x334155, 0x1e293b);
             scene.add(grid);
-            
             const planeGeo = new THREE.PlaneGeometry(100, 100);
             const planeMat = new THREE.ShadowMaterial({ opacity: 0.5 });
             const floor = new THREE.Mesh(planeGeo, planeMat);
-            floor.rotation.x = -Math.PI / 2;
-            floor.position.y = -0.01;
-            floor.receiveShadow = true;
+            floor.rotation.x = -Math.PI / 2; floor.position.y = -0.01; floor.receiveShadow = true;
             scene.add(floor);
         }
 
         // ---------------------------------------------------------
-        // 3. Sync Logic (Critical for Clipping)
+        // 3. Sync & Transform Logic
         // ---------------------------------------------------------
         function syncClippingPlaneToBlade() {
             if (!bladeGroup || !clipPlane) return;
-
+            
             bladeGroup.updateMatrixWorld();
             
-            // Blade's down vector is (0, -1, 0) in local space
+            // Get Normal from Blade Orientation
             const normal = new THREE.Vector3(0, -1, 0);
             normal.applyQuaternion(bladeGroup.quaternion).normalize();
             
+            // Get Constant (distance) from Blade Position
             const point = bladeGroup.position.clone();
             const constant = -point.dot(normal);
 
+            // Update Plane & Cap
             clipPlane.normal.copy(normal);
             clipPlane.constant = constant;
-
-            // Update Cap Mesh
+            
             capMesh.position.copy(point);
             capMesh.quaternion.copy(bladeGroup.quaternion);
-            
-            // Rotate Cap Mesh to face the normal (since PlaneGeometry faces Z+)
-            // Or simply lookAt. Since we copied quaternion from a box whose down face is -Y,
-            // and Plane is +Z.
-            // Let's align manually to be safe.
             capMesh.lookAt(point.clone().add(normal));
-        }
-
-        function updateBladeTransform() {
-            // Position Y handles by Animation or Reset
-            if (!isCut) {
-                bladeGroup.position.y = bladeStartHeight;
-            }
-            
-            // 1. 이동 적용 (X축 기준 좌우 이동)
-            bladeGroup.position.x = params.shift;
-            
-            // 2. 회전 적용
-            // Reset rotation
-            bladeGroup.rotation.set(0, 0, 0);
-            
-            // Order matters: Rotate Direction (Y) -> Tilt (X)
-            bladeGroup.rotateY(THREE.Math.degToRad(params.rotate));
-            bladeGroup.rotateX(THREE.Math.degToRad(params.tilt));
-            
-            syncClippingPlaneToBlade();
         }
 
         function onWindowResize() {
@@ -414,84 +346,85 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            controls.update();
-            syncClippingPlaneToBlade(); // Always sync for animation smoothness
+            orbitControls.update();
+            // syncClippingPlaneToBlade(); // Event based is better for performance, but can add here if glitches occur
             renderer.render(scene, camera);
         }
 
         // ---------------------------------------------------------
-        // 4. UI & Interaction
+        // 4. UI & Action Logic
         // ---------------------------------------------------------
-        const sliderShift = document.getElementById('slider-shift');
-        const sliderTilt = document.getElementById('slider-tilt');
-        const sliderRotate = document.getElementById('slider-rotate');
-        
-        const valShift = document.getElementById('val-shift');
-        const valTilt = document.getElementById('val-tilt');
-        const valRotate = document.getElementById('val-rotate');
-        
+        const btnTranslate = document.getElementById('btn-mode-translate');
+        const btnRotate = document.getElementById('btn-mode-rotate');
         const btnAction = document.getElementById('btn-action');
 
-        function onSliderChange() {
-            if(isCut) return; 
-            
-            params.shift = parseFloat(sliderShift.value);
-            params.tilt = parseFloat(sliderTilt.value);
-            params.rotate = parseFloat(sliderRotate.value);
-            
-            valShift.innerText = params.shift.toFixed(1);
-            valTilt.innerText = params.tilt + '°';
-            valRotate.innerText = params.rotate + '°';
-            
-            updateBladeTransform();
-        }
+        // Mode Switching
+        btnTranslate.addEventListener('click', () => {
+            if(isCut) return;
+            transformControl.setMode('translate');
+            btnTranslate.classList.add('active-mode', 'text-white');
+            btnTranslate.classList.remove('text-slate-400');
+            btnRotate.classList.remove('active-mode', 'text-white');
+            btnRotate.classList.add('text-slate-400');
+        });
 
-        sliderShift.addEventListener('input', onSliderChange);
-        sliderTilt.addEventListener('input', onSliderChange);
-        sliderRotate.addEventListener('input', onSliderChange);
+        btnRotate.addEventListener('click', () => {
+            if(isCut) return;
+            transformControl.setMode('rotate');
+            btnRotate.classList.add('active-mode', 'text-white');
+            btnRotate.classList.remove('text-slate-400');
+            btnTranslate.classList.remove('active-mode', 'text-white');
+            btnTranslate.classList.add('text-slate-400');
+        });
 
+        // Action (Cut / Reset)
         btnAction.addEventListener('click', () => {
             if (!isCut) {
-                // [CUT Action]
+                // [START CUT]
                 isCut = true;
                 
-                // UI Lock
-                sliderShift.disabled = true;
-                sliderTilt.disabled = true;
-                sliderRotate.disabled = true;
-                document.querySelector('.bg-slate-900\\/80').classList.add('opacity-50');
+                // 1. Hide Controls
+                transformControl.detach();
                 
-                // Animate Down
+                // 2. Save current user-defined state
+                savedBladeState.position.copy(bladeGroup.position);
+                savedBladeState.quaternion.copy(bladeGroup.quaternion);
+
+                // 3. Animate Down
+                // 목표 지점: 현재 칼의 방향으로 쭉 내려가서 바닥(Y=0)을 지나는 지점까지
+                // 단순하게 Y만 0 이하로 내리는 방식 사용
                 gsap.to(bladeGroup.position, {
-                    y: bladeCutHeight,
-                    duration: 0.8,
-                    ease: "power4.inOut",
+                    y: -2, // 바닥을 뚫고 지나가도록
+                    duration: 0.6,
+                    ease: "power4.in",
+                    onUpdate: syncClippingPlaneToBlade,
                     onComplete: () => {
-                        btnAction.innerHTML = '<i class="fas fa-undo"></i> RESET';
-                        btnAction.classList.remove('from-cyan-500', 'to-blue-600', 'btn-pulse');
-                        btnAction.classList.add('from-pink-500', 'to-rose-600');
+                        // Change Button Style
+                        btnAction.classList.remove('btn-cut');
+                        btnAction.classList.add('btn-reset');
+                        btnAction.innerHTML = '<i class="fas fa-undo text-xl mb-1"></i>RESET';
                     }
                 });
 
             } else {
-                // [RESET Action]
+                // [RESET]
                 isCut = false;
-                
-                // UI Unlock
-                sliderShift.disabled = false;
-                sliderTilt.disabled = false;
-                sliderRotate.disabled = false;
-                document.querySelector('.bg-slate-900\\/80').classList.remove('opacity-50');
 
-                // Animate Up
+                // Animate Back to Saved Position
                 gsap.to(bladeGroup.position, {
-                    y: bladeStartHeight,
+                    x: savedBladeState.position.x,
+                    y: savedBladeState.position.y,
+                    z: savedBladeState.position.z,
                     duration: 1.0,
-                    ease: "power2.out",
+                    ease: "power3.out",
+                    onUpdate: syncClippingPlaneToBlade,
                     onComplete: () => {
-                        btnAction.innerHTML = '<i class="fas fa-cut"></i> CUT !';
-                        btnAction.classList.remove('from-pink-500', 'to-rose-600');
-                        btnAction.classList.add('from-cyan-500', 'to-blue-600', 'btn-pulse');
+                        // Restore Controls & Button
+                        transformControl.attach(bladeGroup);
+                        
+                        btnAction.classList.remove('btn-reset');
+                        btnAction.classList.add('btn-cut');
+                        btnAction.innerHTML = '<i class="fas fa-cut text-xl mb-1"></i>CUT';
                     }
                 });
             }
@@ -503,7 +436,7 @@
         const closeAi = document.getElementById('close-ai');
         
         async function callGemini(prompt) {
-            if (!apiKey) return "API 키 미설정";
+            if (!apiKey) return "API Key Missing";
             const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
             try {
                 const response = await fetch(url, {
@@ -511,45 +444,40 @@
                     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
                 });
                 const data = await response.json();
-                return data.candidates?.[0]?.content?.parts?.[0]?.text || "분석 실패";
-            } catch (e) { return "오류 발생"; }
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "Error";
+            } catch (e) { return "Error"; }
         }
 
         btnAi.addEventListener('click', async () => {
             aiModal.querySelector('div').classList.remove('translate-y-full');
             document.getElementById('loading-overlay').classList.remove('hidden');
             
-            const stateDesc = isCut ? "도형이 잘린 상태" : "자르기 전 설정 단계";
+            // 현재 블레이드 상태 가져오기
+            const pos = bladeGroup.position;
+            const rot = bladeGroup.rotation; // Euler
 
             const prompt = `
-                수학 선생님 페르소나. 한국어로 답변.
-                [상황] 3D 원뿔대 절단 시뮬레이션. ${stateDesc}.
-                [파라미터]
-                - 윗면 반지름: ${params.radiusTop}
-                - 아랫면 반지름: ${params.radiusBottom}
-                - 높이: ${params.height}
-                - 칼 이동(Shift): ${params.shift} (중심축으로부터 거리)
-                - 칼 기울기(Tilt): ${params.tilt}도
-                - 칼 방향(Rotate): ${params.rotate}도
+                수학 선생님 역할. 한국어 답변.
+                [상황] 3D 원뿔대 작도 실험 (Direct 3D Control).
+                [현재 칼 상태]
+                - 위치(x,y,z): (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})
+                - 회전(x,y,z): (${THREE.Math.radToDeg(rot.x).toFixed(0)}°, ${THREE.Math.radToDeg(rot.y).toFixed(0)}°, ${THREE.Math.radToDeg(rot.z).toFixed(0)}°)
+                - 원뿔대 높이: ${params.height}
                 
-                [요청]
-                1. 현재 설정(이동값과 각도)으로 잘랐을 때 예상되는 '단면의 기하학적 모양'(원, 타원, 포물선, 쌍곡선, 이등변삼각형 등)을 추론하고 설명해줘.
-                2. '이동(Shift)' 값이 단면 모양에 미치는 영향을 설명해줘 (예: 중심을 지나면 삼각형, 벗어나면 쌍곡선 등).
-                3. 재미있는 기하학 퀴즈 하나 내줘.
+                [질문]
+                1. 현재 칼의 위치와 각도로 잘랐을 때 생기는 단면은 기하학적으로 어떤 모양일까요? (원, 타원, 포물선, 쌍곡선, 삼각형 등)
+                2. 칼의 위치를 중심축에서 멀리 이동시키면 단면 모양이 어떻게 변하는지 설명해주세요.
+                3. 간단한 원뿔 곡선 관련 퀴즈 하나.
             `;
 
             const result = await callGemini(prompt);
-            const formatted = result.replace(/\*\*(.*?)\*\*/g, '<span class="text-cyan-400 font-bold">$1</span>').replace(/\n/g, '<br>');
-            document.getElementById('ai-content').innerHTML = formatted;
+            document.getElementById('ai-content').innerHTML = result.replace(/\*\*(.*?)\*\*/g, '<span class="text-cyan-400 font-bold">$1</span>').replace(/\n/g, '<br>');
             document.getElementById('loading-overlay').classList.add('hidden');
         });
 
         closeAi.addEventListener('click', () => {
             aiModal.querySelector('div').classList.add('translate-y-full');
         });
-
-        // Initial
-        updateBladeTransform();
 
     </script>
 </body>
