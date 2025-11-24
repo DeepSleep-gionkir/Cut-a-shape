@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Direct 3D Blade Slicer</title>
+    <title>Cut a Shape</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -12,9 +12,10 @@
             margin: 0; 
             overflow: hidden; 
             background-color: #0f172a; 
-            font-family: 'Noto Sans KR', sans-serif; 
+            font-family: 'Helvetica Neue', 'Noto Sans KR', sans-serif; 
             overscroll-behavior: none;
             user-select: none;
+            transition: background-color 0.5s ease;
         }
         #canvas-container { 
             width: 100vw; 
@@ -23,115 +24,164 @@
             outline: none;
         }
 
-        /* 버튼 스타일 */
+        /* Glass Button Style */
         .glass-btn {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #22d3ee;
-            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         .glass-btn:active {
-            transform: scale(0.95);
-            background: rgba(15, 23, 42, 0.8);
+            transform: scale(0.92);
+            background: rgba(255, 255, 255, 0.2);
         }
         
         .active-mode {
             background: rgba(34, 211, 238, 0.2);
             border-color: #22d3ee;
-            color: white;
-            box-shadow: 0 0 15px rgba(34, 211, 238, 0.3);
+            color: #22d3ee;
+            box-shadow: 0 0 15px rgba(34, 211, 238, 0.2);
         }
 
-        /* CUT 버튼 펄스 */
+        /* CUT Button Animation */
         @keyframes pulse-glow {
             0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.6); }
-            70% { box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
+            70% { box-shadow: 0 0 0 15px rgba(244, 63, 94, 0); }
             100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
         }
         .btn-cut {
             background: linear-gradient(135deg, #f43f5e, #e11d48);
             color: white;
-            box-shadow: 0 4px 15px rgba(244, 63, 94, 0.4);
+            box-shadow: 0 8px 20px rgba(244, 63, 94, 0.4);
             animation: pulse-glow 2s infinite;
         }
         .btn-reset {
             background: linear-gradient(135deg, #3b82f6, #2563eb);
             color: white;
+            animation: none;
         }
 
-        /* 상단 안내 메시지 페이드 */
-        .fade-out {
-            opacity: 0;
-            transition: opacity 1s ease-out;
+        /* Menus Animation */
+        .menu-dropdown {
+            transform-origin: top left;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease;
         }
+        .scale-0-opacity-0 { transform: scale(0.8); opacity: 0; pointer-events: none; }
+        .scale-100-opacity-100 { transform: scale(1); opacity: 1; pointer-events: auto; }
+
+        /* Color Swatches */
+        .color-swatch {
+            width: 24px; height: 24px; border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.2);
+            cursor: pointer; transition: transform 0.2s;
+        }
+        .color-swatch:hover { transform: scale(1.2); border-color: white; }
+        
+        /* Shape Icons (Custom Styled) */
+        .shape-btn {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.05); border-radius: 12px;
+            transition: background 0.2s;
+        }
+        .shape-btn:hover { background: rgba(255,255,255,0.15); }
+        .shape-btn i { font-size: 1.5rem; margin-bottom: 4px; }
+        
     </style>
 </head>
 <body>
 
-    <!-- 3D 캔버스 -->
+    <!-- 3D Canvas -->
     <div id="canvas-container"></div>
 
-    <!-- 상단 타이틀 & AI 버튼 -->
-    <div class="fixed top-0 left-0 right-0 p-4 flex justify-between items-start pointer-events-none z-50">
-        <button id="btn-ai" class="pointer-events-auto glass-btn w-12 h-12 rounded-xl flex items-center justify-center shadow-lg">
-            <i class="fas fa-brain text-xl"></i>
-        </button>
+    <!-- Top Left Controls -->
+    <div class="fixed top-0 left-0 p-5 flex gap-3 pointer-events-none z-50 items-start">
         
-        <div class="text-center pointer-events-none" id="guide-msg">
-            <h1 class="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-sm">
-                VIVID CUT 3D
-            </h1>
-            <p class="text-[10px] text-cyan-200/70 mt-1">
-                화살표를 드래그하여 칼을 움직이세요
-            </p>
+        <!-- 1. Shape Menu -->
+        <div class="relative pointer-events-auto">
+            <button id="btn-shape-toggle" class="glass-btn w-12 h-12 rounded-2xl flex items-center justify-center">
+                <i id="current-shape-icon" class="fas fa-shapes"></i>
+            </button>
+            <div id="shape-menu" class="menu-dropdown absolute top-14 left-0 bg-slate-800/95 backdrop-blur-xl border border-slate-600 rounded-2xl p-3 w-56 shadow-2xl scale-0-opacity-0 grid grid-cols-3 gap-2">
+                <button onclick="changeShape('cone')" class="shape-btn p-3 text-yellow-400"><i class="fas fa-filter transform rotate-180"></i><span class="text-[9px] text-gray-300">Cone</span></button>
+                <button onclick="changeShape('cube')" class="shape-btn p-3 text-blue-400"><i class="fas fa-cube"></i><span class="text-[9px] text-gray-300">Cube</span></button>
+                <button onclick="changeShape('sphere')" class="shape-btn p-3 text-red-400"><i class="fas fa-circle"></i><span class="text-[9px] text-gray-300">Sphere</span></button>
+                <button onclick="changeShape('cylinder')" class="shape-btn p-3 text-green-400"><i class="fas fa-database"></i><span class="text-[9px] text-gray-300">Cylinder</span></button>
+                <button onclick="changeShape('torus')" class="shape-btn p-3 text-purple-400"><i class="fas fa-ring"></i><span class="text-[9px] text-gray-300">Torus</span></button>
+                <button onclick="changeShape('icosahedron')" class="shape-btn p-3 text-orange-400"><i class="fas fa-dice-d20"></i><span class="text-[9px] text-gray-300">Icosa</span></button>
+            </div>
         </div>
-        
-        <div class="w-12"></div> <!-- Spacer -->
+
+        <!-- 2. Color/Theme Menu -->
+        <div class="relative pointer-events-auto">
+            <button id="btn-color-toggle" class="glass-btn w-12 h-12 rounded-2xl flex items-center justify-center">
+                <i class="fas fa-palette"></i>
+            </button>
+            <div id="color-menu" class="menu-dropdown absolute top-14 left-0 bg-slate-800/95 backdrop-blur-xl border border-slate-600 rounded-2xl p-4 w-48 shadow-2xl scale-0-opacity-0">
+                <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-2 font-bold">Shape Color</p>
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <div onclick="changeColor(0x06b6d4, 0xf43f5e)" class="color-swatch bg-cyan-500 shadow-[0_0_10px_#06b6d4]"></div>
+                    <div onclick="changeColor(0xf59e0b, 0x3b82f6)" class="color-swatch bg-amber-500 shadow-[0_0_10px_#f59e0b]"></div>
+                    <div onclick="changeColor(0x10b981, 0x8b5cf6)" class="color-swatch bg-emerald-500 shadow-[0_0_10px_#10b981]"></div>
+                    <div onclick="changeColor(0xec4899, 0xfacc15)" class="color-swatch bg-pink-500 shadow-[0_0_10px_#ec4899]"></div>
+                    <div onclick="changeColor(0x6366f1, 0x14b8a6)" class="color-swatch bg-indigo-500 shadow-[0_0_10px_#6366f1]"></div>
+                </div>
+                
+                <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-2 font-bold">Background</p>
+                <div class="flex gap-2">
+                    <div onclick="changeBg('#0f172a')" class="w-8 h-8 rounded-lg bg-slate-900 border border-slate-600 cursor-pointer"></div>
+                    <div onclick="changeBg('#000000')" class="w-8 h-8 rounded-lg bg-black border border-gray-800 cursor-pointer"></div>
+                    <div onclick="changeBg('#1e1b4b')" class="w-8 h-8 rounded-lg bg-indigo-950 border border-indigo-900 cursor-pointer"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. AI Button -->
+        <button id="btn-ai" class="pointer-events-auto glass-btn w-12 h-12 rounded-2xl flex items-center justify-center hover:text-purple-400">
+            <i class="fas fa-brain"></i>
+        </button>
     </div>
 
-    <!-- 하단 컨트롤 바 (매우 심플) -->
-    <div class="fixed bottom-8 left-0 right-0 z-50 flex justify-center items-center gap-6 pointer-events-none">
-        
-        <!-- 모드 변경 버튼 (이동/회전) -->
-        <div class="pointer-events-auto bg-slate-900/80 backdrop-blur-md rounded-full p-1.5 flex border border-slate-700 shadow-2xl">
+    <!-- Bottom Controls -->
+    <div class="fixed bottom-10 left-0 right-0 z-50 flex justify-center items-center gap-8 pointer-events-none">
+        <!-- Gizmo Toggle -->
+        <div class="pointer-events-auto bg-black/40 backdrop-blur-md rounded-full p-1.5 flex border border-white/10 shadow-xl">
             <button id="btn-mode-translate" class="active-mode w-12 h-12 rounded-full flex items-center justify-center transition-all">
                 <i class="fas fa-arrows-alt"></i>
             </button>
-            <button id="btn-mode-rotate" class="w-12 h-12 rounded-full text-slate-400 flex items-center justify-center transition-all hover:text-white">
+            <button id="btn-mode-rotate" class="w-12 h-12 rounded-full text-slate-400 flex items-center justify-center transition-all hover:text-white hover:bg-white/10">
                 <i class="fas fa-sync-alt"></i>
             </button>
         </div>
 
-        <!-- 자르기 액션 버튼 -->
-        <button id="btn-action" class="pointer-events-auto btn-cut w-20 h-20 rounded-full flex flex-col items-center justify-center font-black text-sm shadow-2xl border-4 border-slate-900 active:scale-90 transition-transform">
-            <i class="fas fa-cut text-xl mb-1"></i>
+        <!-- Action Button -->
+        <button id="btn-action" class="pointer-events-auto btn-cut w-20 h-20 rounded-3xl rotate-3 flex flex-col items-center justify-center font-black text-sm shadow-2xl border border-white/20 active:scale-95 transition-transform hover:rotate-0">
+            <i class="fas fa-cut text-2xl mb-1"></i>
             CUT
         </button>
-
     </div>
 
-    <!-- AI 결과 모달 -->
-    <div id="ai-modal" class="hidden fixed inset-0 z-[70] flex items-end sm:items-center justify-center pointer-events-none bg-black/50 backdrop-blur-sm">
+    <!-- AI Modal -->
+    <div id="ai-modal" class="hidden fixed inset-0 z-[70] flex items-end sm:items-center justify-center pointer-events-none bg-black/60 backdrop-blur-sm">
         <div class="bg-slate-900 text-white w-full sm:w-96 max-h-[80vh] sm:rounded-2xl rounded-t-2xl shadow-2xl border border-slate-700 flex flex-col pointer-events-auto transform transition-transform duration-300 translate-y-full">
             <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-2xl">
-                <h3 class="font-bold text-cyan-400"><i class="fas fa-robot mr-2"></i>AI Analysis</h3>
+                <h3 class="font-bold text-cyan-400"><i class="fas fa-robot mr-2"></i>Gemini Analysis</h3>
                 <button id="close-ai" class="text-gray-400 hover:text-white p-2"><i class="fas fa-times"></i></button>
             </div>
             <div id="ai-content" class="p-6 overflow-y-auto custom-scroll text-sm leading-relaxed text-slate-300"></div>
         </div>
     </div>
 
-    <!-- 로딩 인디케이터 -->
+    <!-- Loading -->
     <div id="loading-overlay" class="hidden fixed inset-0 bg-black/80 z-[80] flex flex-col items-center justify-center text-white backdrop-blur-sm">
-        <div class="animate-spin rounded-full h-14 w-14 border-4 border-t-cyan-500 border-slate-700 mb-4"></div>
-        <p class="text-lg font-bold animate-pulse text-cyan-400">Thinking...</p>
+        <div class="animate-spin rounded-full h-12 w-12 border-4 border-t-cyan-500 border-slate-700 mb-4"></div>
+        <p class="text-sm font-bold animate-pulse text-cyan-400 tracking-widest">GEMINI IS THINKING...</p>
     </div>
 
-    <!-- Three.js Libraries -->
+    <!-- Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <!-- TransformControls (핵심: 3D 조작 기즈모) -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/TransformControls.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
 
@@ -146,34 +196,27 @@
         let clipPlane, capMesh;
         
         let isCut = false;
+        let currentShapeType = 'cone';
+        let currentShapeColor = 0x06b6d4; // Default Cyan
+        let currentCapColor = 0xf43f5e;   // Default Pink
         
-        // 자르기 전 칼의 위치/회전을 기억하기 위한 변수
         let savedBladeState = {
-            position: new THREE.Vector3(0, 6, 0),
+            position: new THREE.Vector3(0, 7, 0),
             quaternion: new THREE.Quaternion()
-        };
-
-        const params = {
-            radiusTop: 2.5,
-            radiusBottom: 4.5,
-            height: 6.0,
         };
 
         init();
         animate();
 
         function init() {
-            // Scene
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x0f172a); 
             scene.fog = new THREE.FogExp2(0x0f172a, 0.02);
 
-            // Camera
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 10, 18);
+            camera.position.set(0, 12, 20);
             camera.lookAt(0, 0, 0);
 
-            // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -183,8 +226,7 @@
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             // Lights
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
             const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
             mainLight.position.set(10, 20, 10);
             mainLight.castShadow = true;
@@ -194,77 +236,112 @@
             rimLight.position.set(-10, 10, -10);
             scene.add(rimLight);
 
-            // 1. Clipping Plane & Object
-            clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 6);
+            // Plane & Group
+            clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 7);
             objectGroup = new THREE.Group();
             scene.add(objectGroup);
-            createSolidCone();
+            updateSolidShape('cone');
 
-            // 2. Blade & Floor
+            // Blade & Floor
             createBlade();
             createFloor();
 
-            // 3. Controls
-            // Orbit Controls (Camera)
+            // Controls
             orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
             orbitControls.enableDamping = true;
-            orbitControls.dampingFactor = 0.05;
             orbitControls.maxPolarAngle = Math.PI / 2 - 0.1;
 
-            // Transform Controls (Blade Manipulation - NEW)
             transformControl = new THREE.TransformControls(camera, renderer.domElement);
-            transformControl.addEventListener('change', () => renderer.render(scene, camera)); // 렌더링 갱신
-            transformControl.addEventListener('dragging-changed', function (event) {
-                // 드래그 중에는 카메라 회전 비활성화
-                orbitControls.enabled = !event.value;
-            });
-            
-            // 칼 그룹에 컨트롤 부착
+            transformControl.addEventListener('change', () => renderer.render(scene, camera));
+            transformControl.addEventListener('dragging-changed', (event) => orbitControls.enabled = !event.value);
             transformControl.attach(bladeGroup);
             scene.add(transformControl);
-
-            // 드래그 중에 실시간으로 Clipping Plane 업데이트
             transformControl.addEventListener('change', syncClippingPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
-
-            // 안내 메시지 3초 뒤 페이드 아웃
-            setTimeout(() => {
-                const guide = document.getElementById('guide-msg');
-                if(guide) guide.classList.add('fade-out');
-            }, 4000);
         }
 
         // ---------------------------------------------------------
-        // 2. Object & Blade Logic
+        // 2. Shape & Color Logic
         // ---------------------------------------------------------
-        function createSolidCone() {
-            const geometry = new THREE.CylinderGeometry(params.radiusTop, params.radiusBottom, params.height, 64, 1, false);
-            
-            // Cyan Exterior
+        window.changeShape = function(type) {
+            if(isCut) return;
+            currentShapeType = type;
+            updateSolidShape(type);
+            closeAllMenus();
+        };
+
+        window.changeColor = function(colorHex, capHex) {
+            currentShapeColor = colorHex;
+            currentCapColor = capHex;
+            updateSolidShape(currentShapeType);
+            closeAllMenus();
+        };
+
+        window.changeBg = function(colorStr) {
+            scene.background = new THREE.Color(colorStr);
+            scene.fog = new THREE.FogExp2(colorStr, 0.02);
+            document.body.style.backgroundColor = colorStr;
+            closeAllMenus();
+        };
+
+        function getGeometry(type) {
+            switch(type) {
+                case 'cone': return new THREE.CylinderGeometry(2.5, 4.5, 6, 64, 1, false);
+                case 'cube': return new THREE.BoxGeometry(6, 6, 6);
+                case 'sphere': return new THREE.SphereGeometry(3.5, 64, 64);
+                case 'cylinder': return new THREE.CylinderGeometry(3.5, 3.5, 7, 64);
+                case 'torus': return new THREE.TorusGeometry(3.5, 1.2, 48, 100);
+                case 'icosahedron': return new THREE.IcosahedronGeometry(4, 0);
+                default: return new THREE.BoxGeometry(5,5,5);
+            }
+        }
+
+        function updateSolidShape(type) {
+            // Cleanup
+            while(objectGroup.children.length > 0){ 
+                const child = objectGroup.children[0];
+                if(child.geometry) child.geometry.dispose();
+                if(child.material) child.material.dispose();
+                objectGroup.remove(child);
+            }
+            if(capMesh) { scene.remove(capMesh); capMesh.geometry.dispose(); capMesh.material.dispose(); }
+
+            const geometry = getGeometry(type);
+
+            // Main Material
             const material = new THREE.MeshStandardMaterial({
-                color: 0x06b6d4, emissive: 0x083344, roughness: 0.2, metalness: 0.6,
+                color: currentShapeColor, 
+                emissive: new THREE.Color(currentShapeColor).multiplyScalar(0.2), 
+                roughness: 0.2, metalness: 0.6,
                 clippingPlanes: [clipPlane], clipShadows: true, side: THREE.FrontSide,
             });
             const mesh = new THREE.Mesh(geometry, material);
             mesh.castShadow = true; mesh.receiveShadow = true;
             objectGroup.add(mesh);
 
-            // Stencil Cap
+            // Stencil
             const stencilGroup = createPlaneStencilGroup(geometry, clipPlane, 1);
             objectGroup.add(stencilGroup);
 
-            // Pink Cap
+            // Cap
             const capMat = new THREE.MeshStandardMaterial({
-                color: 0xf43f5e, emissive: 0x881337, metalness: 0.1, roughness: 0.1,
+                color: currentCapColor, emissive: new THREE.Color(currentCapColor).multiplyScalar(0.2),
+                metalness: 0.1, roughness: 0.1,
                 stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc,
-                stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp,
-                stencilZPass: THREE.KeepStencilOp, side: THREE.DoubleSide
+                stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
+                side: THREE.DoubleSide
             });
-            const capGeo = new THREE.PlaneGeometry(40, 40);
-            capMesh = new THREE.Mesh(capGeo, capMat);
+            capMesh = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), capMat);
             capMesh.renderOrder = 1.1;
+            
+            // Sync
+            if(bladeGroup) {
+                capMesh.position.copy(bladeGroup.position);
+                capMesh.quaternion.copy(bladeGroup.quaternion);
+            }
             scene.add(capMesh);
+            syncClippingPlaneToBlade();
         }
 
         function createPlaneStencilGroup(geometry, plane, renderOrder) {
@@ -283,19 +360,19 @@
             return group;
         }
 
+        // ---------------------------------------------------------
+        // 3. Scene Objects
+        // ---------------------------------------------------------
         function createBlade() {
             bladeGroup = new THREE.Group();
-            // Initial Position
-            bladeGroup.position.set(0, 6, 0);
+            bladeGroup.position.set(0, 7, 0);
 
-            const bladeGeo = new THREE.BoxGeometry(12, 0.1, 12);
+            const bladeGeo = new THREE.BoxGeometry(14, 0.1, 14);
             const bladeMat = new THREE.MeshPhysicalMaterial({
                 color: 0xffffff, metalness: 0.9, roughness: 0.0, transmission: 0.3,
                 transparent: true, opacity: 0.7, side: THREE.DoubleSide
             });
             const bladeMesh = new THREE.Mesh(bladeGeo, bladeMat);
-            
-            // Edge Glow
             const edges = new THREE.EdgesGeometry(bladeGeo);
             const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x22d3ee }));
             bladeMesh.add(line);
@@ -306,33 +383,22 @@
         function createFloor() {
             const grid = new THREE.GridHelper(50, 50, 0x334155, 0x1e293b);
             scene.add(grid);
-            const planeGeo = new THREE.PlaneGeometry(100, 100);
-            const planeMat = new THREE.ShadowMaterial({ opacity: 0.5 });
-            const floor = new THREE.Mesh(planeGeo, planeMat);
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.ShadowMaterial({ opacity: 0.5 }));
             floor.rotation.x = -Math.PI / 2; floor.position.y = -0.01; floor.receiveShadow = true;
             scene.add(floor);
         }
 
         // ---------------------------------------------------------
-        // 3. Sync & Transform Logic
+        // 4. Logic
         // ---------------------------------------------------------
         function syncClippingPlaneToBlade() {
-            if (!bladeGroup || !clipPlane) return;
-            
+            if (!bladeGroup || !clipPlane || !capMesh) return;
             bladeGroup.updateMatrixWorld();
-            
-            // Get Normal from Blade Orientation
-            const normal = new THREE.Vector3(0, -1, 0);
-            normal.applyQuaternion(bladeGroup.quaternion).normalize();
-            
-            // Get Constant (distance) from Blade Position
+            const normal = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
             const point = bladeGroup.position.clone();
             const constant = -point.dot(normal);
-
-            // Update Plane & Cap
             clipPlane.normal.copy(normal);
             clipPlane.constant = constant;
-            
             capMesh.position.copy(point);
             capMesh.quaternion.copy(bladeGroup.quaternion);
             capMesh.lookAt(point.clone().add(normal));
@@ -347,81 +413,74 @@
         function animate() {
             requestAnimationFrame(animate);
             orbitControls.update();
-            // syncClippingPlaneToBlade(); // Event based is better for performance, but can add here if glitches occur
             renderer.render(scene, camera);
         }
 
         // ---------------------------------------------------------
-        // 4. UI & Action Logic
+        // 5. UI Event Handlers
         // ---------------------------------------------------------
+        const btnShapeToggle = document.getElementById('btn-shape-toggle');
+        const shapeMenu = document.getElementById('shape-menu');
+        const btnColorToggle = document.getElementById('btn-color-toggle');
+        const colorMenu = document.getElementById('color-menu');
+        const btnAction = document.getElementById('btn-action');
         const btnTranslate = document.getElementById('btn-mode-translate');
         const btnRotate = document.getElementById('btn-mode-rotate');
-        const btnAction = document.getElementById('btn-action');
 
-        // Mode Switching
-        btnTranslate.addEventListener('click', () => {
-            if(isCut) return;
-            transformControl.setMode('translate');
-            btnTranslate.classList.add('active-mode', 'text-white');
-            btnTranslate.classList.remove('text-slate-400');
-            btnRotate.classList.remove('active-mode', 'text-white');
-            btnRotate.classList.add('text-slate-400');
-        });
+        function toggleMenu(menu, triggerBtn) {
+            const isOpen = menu.classList.contains('scale-100-opacity-100');
+            closeAllMenus(); // Close others first
+            if (!isOpen) {
+                menu.classList.remove('scale-0-opacity-0');
+                menu.classList.add('scale-100-opacity-100');
+            }
+        }
 
-        btnRotate.addEventListener('click', () => {
-            if(isCut) return;
-            transformControl.setMode('rotate');
-            btnRotate.classList.add('active-mode', 'text-white');
-            btnRotate.classList.remove('text-slate-400');
-            btnTranslate.classList.remove('active-mode', 'text-white');
-            btnTranslate.classList.add('text-slate-400');
-        });
+        function closeAllMenus() {
+            [shapeMenu, colorMenu].forEach(m => {
+                m.classList.remove('scale-100-opacity-100');
+                m.classList.add('scale-0-opacity-0');
+            });
+        }
 
-        // Action (Cut / Reset)
-        btnAction.addEventListener('click', () => {
+        btnShapeToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(shapeMenu); });
+        btnColorToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(colorMenu); });
+        document.addEventListener('click', closeAllMenus);
+
+        btnTranslate.addEventListener('click', (e) => { e.stopPropagation(); if(isCut) return; transformControl.setMode('translate'); toggleActiveMode(btnTranslate, btnRotate); });
+        btnRotate.addEventListener('click', (e) => { e.stopPropagation(); if(isCut) return; transformControl.setMode('rotate'); toggleActiveMode(btnRotate, btnTranslate); });
+
+        function toggleActiveMode(active, inactive) {
+            active.classList.add('active-mode'); active.style.color = '#22d3ee';
+            inactive.classList.remove('active-mode'); inactive.style.color = '#94a3b8';
+        }
+
+        btnAction.addEventListener('click', (e) => {
+            e.stopPropagation();
             if (!isCut) {
-                // [START CUT]
                 isCut = true;
-                
-                // 1. Hide Controls
                 transformControl.detach();
-                
-                // 2. Save current user-defined state
                 savedBladeState.position.copy(bladeGroup.position);
                 savedBladeState.quaternion.copy(bladeGroup.quaternion);
 
-                // 3. Animate Down
-                // 목표 지점: 현재 칼의 방향으로 쭉 내려가서 바닥(Y=0)을 지나는 지점까지
-                // 단순하게 Y만 0 이하로 내리는 방식 사용
+                // Cut Logic: Move blade down past the object
                 gsap.to(bladeGroup.position, {
-                    y: -2, // 바닥을 뚫고 지나가도록
-                    duration: 0.6,
-                    ease: "power4.in",
+                    y: -4, duration: 0.6, ease: "power4.in",
                     onUpdate: syncClippingPlaneToBlade,
                     onComplete: () => {
-                        // Change Button Style
                         btnAction.classList.remove('btn-cut');
                         btnAction.classList.add('btn-reset');
                         btnAction.innerHTML = '<i class="fas fa-undo text-xl mb-1"></i>RESET';
                     }
                 });
-
             } else {
-                // [RESET]
                 isCut = false;
-
-                // Animate Back to Saved Position
                 gsap.to(bladeGroup.position, {
-                    x: savedBladeState.position.x,
-                    y: savedBladeState.position.y,
-                    z: savedBladeState.position.z,
-                    duration: 1.0,
-                    ease: "power3.out",
+                    x: savedBladeState.position.x, y: savedBladeState.position.y, z: savedBladeState.position.z,
+                    duration: 1.0, ease: "power3.out",
                     onUpdate: syncClippingPlaneToBlade,
                     onComplete: () => {
-                        // Restore Controls & Button
                         transformControl.attach(bladeGroup);
-                        
                         btnAction.classList.remove('btn-reset');
                         btnAction.classList.add('btn-cut');
                         btnAction.innerHTML = '<i class="fas fa-cut text-xl mb-1"></i>CUT';
@@ -430,7 +489,7 @@
             }
         });
 
-        // --- AI Logic ---
+        // AI
         const btnAi = document.getElementById('btn-ai');
         const aiModal = document.getElementById('ai-modal');
         const closeAi = document.getElementById('close-ai');
@@ -448,26 +507,20 @@
             } catch (e) { return "Error"; }
         }
 
-        btnAi.addEventListener('click', async () => {
+        btnAi.addEventListener('click', async (e) => {
+            e.stopPropagation();
             aiModal.querySelector('div').classList.remove('translate-y-full');
             document.getElementById('loading-overlay').classList.remove('hidden');
             
-            // 현재 블레이드 상태 가져오기
-            const pos = bladeGroup.position;
-            const rot = bladeGroup.rotation; // Euler
-
             const prompt = `
-                수학 선생님 역할. 한국어 답변.
-                [상황] 3D 원뿔대 작도 실험 (Direct 3D Control).
-                [현재 칼 상태]
-                - 위치(x,y,z): (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})
-                - 회전(x,y,z): (${THREE.Math.radToDeg(rot.x).toFixed(0)}°, ${THREE.Math.radToDeg(rot.y).toFixed(0)}°, ${THREE.Math.radToDeg(rot.z).toFixed(0)}°)
-                - 원뿔대 높이: ${params.height}
+                Math Teacher Persona. Korean Language.
+                [Context] 3D Slicing App.
+                [Shape] ${currentShapeType}
+                [Blade] Pos: ${bladeGroup.position.toArray().map(v=>v.toFixed(1))}, Rot: ${bladeGroup.rotation.toArray().map(v=>(v*180/Math.PI).toFixed(0))}
+                [Color] Main: ${new THREE.Color(currentShapeColor).getHexString()}, Inside: ${new THREE.Color(currentCapColor).getHexString()}
                 
-                [질문]
-                1. 현재 칼의 위치와 각도로 잘랐을 때 생기는 단면은 기하학적으로 어떤 모양일까요? (원, 타원, 포물선, 쌍곡선, 삼각형 등)
-                2. 칼의 위치를 중심축에서 멀리 이동시키면 단면 모양이 어떻게 변하는지 설명해주세요.
-                3. 간단한 원뿔 곡선 관련 퀴즈 하나.
+                Analyze the geometric cross-section formed by this cut. 
+                Keep it fun and educational.
             `;
 
             const result = await callGemini(prompt);
