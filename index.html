@@ -104,7 +104,6 @@
                 <i id="current-shape-icon" class="fas fa-shapes"></i>
             </button>
             <div id="shape-menu" class="menu-dropdown absolute top-14 left-0 bg-slate-800/95 backdrop-blur-xl border border-slate-600 rounded-2xl p-3 w-56 shadow-2xl scale-0-opacity-0 grid grid-cols-3 gap-2">
-                <!-- 입체감이 느껴지는 아이콘들 -->
                 <button onclick="changeShape('cone')" class="shape-btn p-3 text-yellow-400"><i class="fas fa-filter transform rotate-180"></i><span class="text-[9px] text-gray-300">Cone</span></button>
                 <button onclick="changeShape('cube')" class="shape-btn p-3 text-blue-400"><i class="fas fa-cube"></i><span class="text-[9px] text-gray-300">Cube</span></button>
                 <button onclick="changeShape('sphere')" class="shape-btn p-3 text-red-400"><i class="fas fa-circle"></i><span class="text-[9px] text-gray-300">Sphere</span></button>
@@ -143,8 +142,6 @@
             <i class="fas fa-brain"></i>
         </button>
     </div>
-
-    <!-- (REMOVED) Dynamic Title -->
 
     <!-- Bottom Controls -->
     <div class="fixed bottom-10 left-0 right-0 z-50 flex justify-center items-center gap-8 pointer-events-none">
@@ -258,7 +255,7 @@
             transformControl.addEventListener('change', () => renderer.render(scene, camera));
             transformControl.addEventListener('dragging-changed', (event) => orbitControls.enabled = !event.value);
             
-            // [CRITICAL FIX] Set Gizmo to LOCAL space so axes rotate with the object
+            // [CRITICAL FIX 1] Local space is essential for intuitive rotation/translation
             transformControl.setSpace('local');
             
             transformControl.attach(bladeGroup);
@@ -266,8 +263,6 @@
             transformControl.addEventListener('change', syncClippingPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
-            
-            // KEYBOARD SHORTCUTS
             window.addEventListener('keydown', onKeyDown);
         }
 
@@ -394,7 +389,8 @@
             bladeGroup = new THREE.Group();
             bladeGroup.position.set(0, 7, 0);
 
-            const bladeGeo = new THREE.BoxGeometry(14, 0.1, 14);
+            // [CRITICAL FIX 3] Make blade thinner to look sharper
+            const bladeGeo = new THREE.BoxGeometry(14, 0.05, 14);
             const bladeMat = new THREE.MeshPhysicalMaterial({
                 color: 0xffffff, metalness: 0.9, roughness: 0.0, transmission: 0.3,
                 transparent: true, opacity: 0.7, side: THREE.DoubleSide
@@ -479,8 +475,23 @@
         btnColorToggle.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(colorMenu); });
         document.addEventListener('click', closeAllMenus);
 
-        btnTranslate.addEventListener('click', (e) => { e.stopPropagation(); if(isCut) return; transformControl.setMode('translate'); toggleActiveMode(btnTranslate, btnRotate); });
-        btnRotate.addEventListener('click', (e) => { e.stopPropagation(); if(isCut) return; transformControl.setMode('rotate'); toggleActiveMode(btnRotate, btnTranslate); });
+        btnTranslate.addEventListener('click', (e) => { 
+            e.stopPropagation(); 
+            if(isCut) return; 
+            transformControl.setMode('translate'); 
+            // Re-enforce local space
+            transformControl.setSpace('local'); 
+            toggleActiveMode(btnTranslate, btnRotate); 
+        });
+        
+        btnRotate.addEventListener('click', (e) => { 
+            e.stopPropagation(); 
+            if(isCut) return; 
+            transformControl.setMode('rotate'); 
+            // Re-enforce local space
+            transformControl.setSpace('local');
+            toggleActiveMode(btnRotate, btnTranslate); 
+        });
 
         function toggleActiveMode(active, inactive) {
             active.classList.add('active-mode'); active.style.color = '#22d3ee';
@@ -496,19 +507,11 @@
                 savedBladeState.position.copy(bladeGroup.position);
                 savedBladeState.quaternion.copy(bladeGroup.quaternion);
 
-                // Calculate Cut Direction based on Blade's Rotation
-                // Local (0, -1, 0) is the "down" direction of the blade
-                const cutDirection = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
+                // [CRITICAL FIX 2] Force move DOWN on World Y axis (Gravity Chop)
+                // Regardless of rotation, we move "Down"
                 
-                // Distance to move (enough to pass through object)
-                const cutDistance = 12;
-                const targetPos = bladeGroup.position.clone().add(cutDirection.multiplyScalar(cutDistance));
-
-                // Animate along the cut direction
                 gsap.to(bladeGroup.position, {
-                    x: targetPos.x,
-                    y: targetPos.y,
-                    z: targetPos.z,
+                    y: -4, 
                     duration: 0.6,
                     ease: "power4.in",
                     onUpdate: syncClippingPlaneToBlade,
