@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Realistic Slice with Physics</title>
+    <title>Multi-Slice 3D</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -181,7 +181,9 @@
         
         let scene, camera, renderer, orbitControls, transformControl;
         let objectGroup, bladeGroup, debrisGroup;
-        let clipPlane, capMesh;
+        let activePlanes = []; // 여러 개의 클리핑 평면을 저장할 배열
+        let tempPlane, tempCapMesh; // 미리보기용 임시 평면과 캡
+        let solidMesh, stencilGroup; // 메인 도형 참조
         
         // 상태 변수
         let isAnimating = false;
@@ -224,16 +226,14 @@
             rimLight.position.set(-10, 10, -10);
             scene.add(rimLight);
 
-            // Clipping Plane
-            clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+            // [핵심] 미리보기용 임시 평면 (초기에는 아무 효과 없도록 설정)
+            tempPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
             
             objectGroup = new THREE.Group();
             objectGroup.position.y = 3.5; 
             scene.add(objectGroup);
             
-            // [추가] 파편 그룹 생성
             createDebrisPool();
-
             updateSolidShape('cone');
 
             createBlade();
@@ -253,12 +253,13 @@
             transformControl.attach(bladeGroup);
             scene.add(transformControl);
             
-            transformControl.addEventListener('change', syncClippingPlaneToBlade);
+            // 칼 움직일 때 미리보기 업데이트
+            transformControl.addEventListener('change', syncPreviewPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('keydown', onKeyDown);
             
-            syncClippingPlaneToBlade();
+            syncPreviewPlaneToBlade();
         }
 
         // --- Core Functions ---
@@ -276,66 +277,80 @@
         }
 
         function updateSolidShape(type) {
-            // 기존 도형 제거
+            // 기존 도형 및 캡 정리
             while(objectGroup.children.length > 0){ 
                 const child = objectGroup.children[0];
                 if(child.geometry) child.geometry.dispose();
                 if(child.material) child.material.dispose();
                 objectGroup.remove(child);
             }
-            if(capMesh) { scene.remove(capMesh); capMesh.geometry.dispose(); capMesh.material.dispose(); }
+            if(tempCapMesh) { scene.remove(tempCapMesh); tempCapMesh.geometry.dispose(); tempCapMesh.material.dispose(); }
+
+            // 평면 배열 초기화 (새 도형 만들면 리셋)
+            activePlanes = []; 
 
             const geometry = getGeometry(type);
 
+            // 1. 메인 도형
+            // [중요] clippingPlanes에 activePlanes와 tempPlane 모두 포함해야 함
             const material = new THREE.MeshStandardMaterial({
                 color: currentShapeColor, 
                 emissive: new THREE.Color(currentShapeColor).multiplyScalar(0.2), 
                 roughness: 0.2, metalness: 0.6,
-                clippingPlanes: [clipPlane], clipShadows: true, side: THREE.FrontSide,
+                clippingPlanes: [tempPlane], // 초기에는 tempPlane만
+                clipShadows: true, side: THREE.DoubleSide, // 잘린 뒷면도 보여야 하므로 DoubleSide 권장
             });
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.castShadow = true; mesh.receiveShadow = true;
-            objectGroup.add(mesh);
+            solidMesh = new THREE.Mesh(geometry, material);
+            solidMesh.castShadow = true; mesh = solidMesh;
+            objectGroup.add(solidMesh);
 
-            const stencilGroup = createPlaneStencilGroup(geometry, clipPlane, 1);
-            objectGroup.add(stencilGroup);
+            // 2. 단면 채우기 (Stencil 방식 대신 단순화된 캡핑 방식 사용 - 다중 컷을 위해)
+            // Stencil 방식은 다중 클리핑에서 매우 복잡해지므로, 
+            // 여기서는 '미리보기용 캡'과 '영구적인 캡'을 따로 관리하거나, 
+            // 가장 간단하게는 DoubleSide 재질로 안쪽 면을 보여주는 방식을 택함.
+            // 하지만 "잘린 면의 색(Inside Color)"을 보여주기 위해 
+            // 렌더링 순서 기법 등을 활용하는 것이 좋음.
+            
+            // 이 예제에서는 다중 컷의 복잡도를 줄이기 위해
+            // 메인 도형을 DoubleSide로 하고, 잘린 면을 덮는 '미리보기 캡'만 보여줍니다.
+            // 이미 잘린 면은 메인 도형의 안쪽 면(Inside) 색상으로 처리합니다.
+            
+            // * 메인 도형 안쪽 면 색상 적용을 위한 꼼수:
+            // 도형을 하나 더 복사해서 안쪽 면(BackSide)만 렌더링하고 색상을 currentCapColor로 설정
+            const insideMat = new THREE.MeshBasicMaterial({
+                color: currentCapColor,
+                side: THREE.BackSide,
+                clippingPlanes: [tempPlane],
+            });
+            const insideMesh = new THREE.Mesh(geometry, insideMat);
+            objectGroup.add(insideMesh);
 
+
+            // 3. 현재 자르고 있는 단면(Preview Cap) 생성
             const capMat = new THREE.MeshStandardMaterial({
                 color: currentCapColor, emissive: new THREE.Color(currentCapColor).multiplyScalar(0.2),
                 metalness: 0.1, roughness: 0.1,
-                stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc,
-                stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp,
-                side: THREE.DoubleSide
+                side: THREE.DoubleSide,
+                stencilWrite: false // Stencil 끄고 단순 평면으로
             });
-            capMesh = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), capMat);
-            capMesh.renderOrder = 1.1;
+            tempCapMesh = new THREE.Mesh(new THREE.PlaneGeometry(50, 50), capMat);
+            tempCapMesh.renderOrder = 1;
+            scene.add(tempCapMesh);
             
-            if(bladeGroup) {
-                capMesh.position.copy(bladeGroup.position);
-                capMesh.quaternion.copy(bladeGroup.quaternion);
-            }
-            scene.add(capMesh);
-            
-            // [추가] 파편 색상 업데이트
             updateDebrisColor();
-            
-            syncClippingPlaneToBlade();
+            syncPreviewPlaneToBlade();
         }
 
-        function createPlaneStencilGroup(geometry, plane, renderOrder) {
-            const group = new THREE.Group();
-            const baseMat = new THREE.MeshBasicMaterial({
-                depthWrite: false, depthTest: false, colorWrite: false,
-                stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc,
+        // 다중 자르기를 위해 재질의 Clipping Planes 배열 업데이트
+        function updateMeshClippingPlanes() {
+            // 활성 평면들 + 현재 미리보기 평면
+            const allPlanes = [...activePlanes, tempPlane];
+            
+            objectGroup.children.forEach(mesh => {
+                if (mesh.material) {
+                    mesh.material.clippingPlanes = allPlanes;
+                }
             });
-            const mat0 = baseMat.clone(); mat0.side = THREE.BackSide; mat0.clippingPlanes = [plane];
-            mat0.stencilFail = THREE.IncrementWrapStencilOp; mat0.stencilZFail = THREE.IncrementWrapStencilOp; mat0.stencilZPass = THREE.IncrementWrapStencilOp;
-            group.add(new THREE.Mesh(geometry, mat0));
-
-            const mat1 = baseMat.clone(); mat1.side = THREE.FrontSide; mat1.clippingPlanes = [plane];
-            mat1.stencilFail = THREE.DecrementWrapStencilOp; mat1.stencilZFail = THREE.DecrementWrapStencilOp; mat1.stencilZPass = THREE.DecrementWrapStencilOp;
-            group.add(new THREE.Mesh(geometry, mat1));
-            return group;
         }
 
         function createBlade() {
@@ -363,15 +378,11 @@
             scene.add(floor);
         }
 
-        // [물리 효과 1] 파편 풀 생성
         function createDebrisPool() {
             debrisGroup = new THREE.Group();
             scene.add(debrisGroup);
-            
             const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-            // 초기 재질은 임시
             const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-
             for(let i=0; i<25; i++) {
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.visible = false;
@@ -379,103 +390,99 @@
             }
         }
 
-        // [물리 효과 2] 파편 색상 동기화
         function updateDebrisColor() {
             if(!debrisGroup) return;
             debrisGroup.children.forEach(child => {
                 child.material = new THREE.MeshStandardMaterial({
                     color: currentShapeColor,
                     emissive: new THREE.Color(currentCapColor),
-                    roughness: 0.2,
-                    metalness: 0.5
+                    roughness: 0.2, metalness: 0.5
                 });
             });
         }
 
-        // [물리 효과 3] 폭발 이펙트 트리거
         function triggerPhysicsExplosion(position, bladeNormal) {
-            // 1. 카메라 쉐이크
             gsap.to(camera.position, {
-                x: "+=0.3", y: "+=0.3", 
-                duration: 0.05, 
-                yoyo: true, 
-                repeat: 5,
-                onComplete: () => {
-                    // 원래 위치로 부드럽게 복귀 (살짝 틀어질 수 있으므로)
-                    // orbitControls가 잡아주므로 크게 상관 없지만 안전장치
-                }
+                x: "+=0.3", y: "+=0.3", duration: 0.05, yoyo: true, repeat: 5
             });
-
-            // 2. 파편 튀기기
             debrisGroup.children.forEach((mesh, i) => {
                 mesh.visible = true;
                 mesh.scale.set(1,1,1);
                 mesh.position.copy(position);
-                
-                // 랜덤 확산 위치 (칼날 평면 위주로)
-                const randomOffset = new THREE.Vector3(
-                    (Math.random() - 0.5) * 4,
-                    (Math.random() - 0.5) * 2,
-                    (Math.random() - 0.5) * 4
-                );
-                
-                // 중력 효과 흉내
+                const randomOffset = new THREE.Vector3((Math.random()-0.5)*4, (Math.random()-0.5)*2, (Math.random()-0.5)*4);
                 const targetPos = position.clone().add(randomOffset);
                 const dropY = -5 - Math.random() * 5;
-
-                // 회전 랜덤
-                const randomRot = {
-                    x: Math.random() * Math.PI * 4,
-                    y: Math.random() * Math.PI * 4
-                };
+                const randomRot = { x: Math.random() * Math.PI * 4, y: Math.random() * Math.PI * 4 };
 
                 const tl = gsap.timeline();
-                
-                // 팍 튀었다가
-                tl.to(mesh.position, {
-                    x: targetPos.x,
-                    y: targetPos.y + 2, // 살짝 위로 솟구침
-                    z: targetPos.z,
-                    duration: 0.3,
-                    ease: "power2.out"
-                })
-                // 아래로 떨어지며 사라짐
-                .to(mesh.position, {
-                    y: dropY,
-                    duration: 0.8,
-                    ease: "bounce.out" // 바닥에 튕기는 느낌
-                }, "-=0.1")
-                .to(mesh.scale, {
-                    x: 0, y: 0, z: 0,
-                    duration: 0.5
-                }, "-=0.8");
-
-                // 회전 애니메이션
-                gsap.to(mesh.rotation, {
-                    x: randomRot.x,
-                    y: randomRot.y,
-                    duration: 1.0,
-                    ease: "none"
-                });
+                tl.to(mesh.position, { x: targetPos.x, y: targetPos.y + 2, z: targetPos.z, duration: 0.3, ease: "power2.out" })
+                  .to(mesh.position, { y: dropY, duration: 0.8, ease: "bounce.out" }, "-=0.1")
+                  .to(mesh.scale, { x: 0, y: 0, z: 0, duration: 0.5 }, "-=0.8");
+                gsap.to(mesh.rotation, { x: randomRot.x, y: randomRot.y, duration: 1.0, ease: "none" });
             });
         }
 
-
-        function syncClippingPlaneToBlade() {
-            if (!bladeGroup || !clipPlane || !capMesh) return;
+        // [핵심] 미리보기용 Plane 동기화
+        function syncPreviewPlaneToBlade() {
+            if (!bladeGroup || !tempPlane || !tempCapMesh) return;
             bladeGroup.updateMatrixWorld();
             
             const normal = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
             const point = bladeGroup.position.clone();
             const constant = -point.dot(normal);
             
-            clipPlane.normal.copy(normal);
-            clipPlane.constant = constant; 
+            // 임시 평면 업데이트 (화면 렌더링에 즉시 반영)
+            tempPlane.normal.copy(normal);
+            tempPlane.constant = constant;
             
-            capMesh.visible = true; 
-            capMesh.position.copy(point);
-            capMesh.quaternion.copy(bladeGroup.quaternion);
-            capMesh.lookAt(point.clone().add(normal));
+            // 캡 메시 위치 업데이트
+            tempCapMesh.visible = true; 
+            tempCapMesh.position.copy(point);
+            tempCapMesh.quaternion.copy(bladeGroup.quaternion);
+            
+            // 다중 평면 상태 업데이트
+            updateMeshClippingPlanes();
+        }
+
+        // [핵심] 자르기 확정 (평면 저장)
+        function commitCut() {
+            // 현재 tempPlane 상태를 복제하여 영구 평면으로 저장
+            const permanentPlane = new THREE.Plane(tempPlane.normal.clone(), tempPlane.constant);
+            activePlanes.push(permanentPlane);
+            
+            // 캡 메시도 영구적으로 남기기 위해 복제
+            const permCapGeo = new THREE.PlaneGeometry(50, 50);
+            const permCapMat = new THREE.MeshStandardMaterial({
+                color: currentCapColor, emissive: new THREE.Color(currentCapColor).multiplyScalar(0.2),
+                metalness: 0.1, roughness: 0.1,
+                side: THREE.DoubleSide,
+                // 저장된 캡도 기존의 모든 잘린 평면들에 의해 잘려야 함 (서로 겹치지 않게)
+                clippingPlanes: activePlanes 
+            });
+            const permCap = new THREE.Mesh(permCapGeo, permCapMat);
+            permCap.position.copy(tempCapMesh.position);
+            permCap.quaternion.copy(tempCapMesh.quaternion);
+            scene.add(permCap);
+            
+            // 중요: 새로 생긴 캡도 이후의 컷에 의해 잘려야 함.
+            // 하지만 Three.js Material의 clippingPlanes는 참조형이므로
+            // 나중에 activePlanes 배열이 바뀌면 자동으로 반영됨.
+            // 다만, '자기 자신'을 자르는 평면이 포함되면 렌더링이 사라질 수 있으므로 주의.
+            // 여기서는 단순화를 위해 모든 캡이 모든 활성 평면을 공유하도록 함.
+            
+            // 기존 캡들 업데이트 (새로운 평면 적용)
+            scene.traverse((obj) => {
+                if (obj.isMesh && obj !== solidMesh && obj !== tempCapMesh && obj.parent !== objectGroup && obj.parent !== bladeGroup) {
+                     // scene에 직접 추가된 영구 캡들
+                     obj.material.clippingPlanes = [...activePlanes, tempPlane];
+                }
+            });
+
+            // 임시 평면 초기화 (안 보이게 멀리 보냄 or 비활성화)
+            // 다음 컷을 위해 tempPlane을 초기화하되, 
+            // 현재 애니메이션이 '복귀' 중이므로 시각적으로 튀지 않게 처리해야 함.
+            // 여기서는 단순히 tempPlane을 아주 멀리 보내거나 무효화시킴.
+            // 그러나 사용자가 다시 칼을 잡으면 syncPreviewPlaneToBlade가 호출되어 다시 활성화됨.
         }
 
         function onWindowResize() {
@@ -491,15 +498,12 @@
         }
 
         // --- UI & Interactions ---
-
         const btnShapeToggle = document.getElementById('btn-shape-toggle');
         const shapeMenu = document.getElementById('shape-menu');
         const btnColorToggle = document.getElementById('btn-color-toggle');
         const colorMenu = document.getElementById('color-menu');
-        
         const btnCut = document.getElementById('btn-cut');
         const btnReset = document.getElementById('btn-reset');
-        
         const btnTranslate = document.getElementById('btn-mode-translate');
         const btnRotate = document.getElementById('btn-mode-rotate');
 
@@ -531,6 +535,23 @@
         window.changeShape = function(type) {
             if(isAnimating) return;
             currentShapeType = type;
+            // 캡들 제거
+            scene.children.slice().forEach(child => {
+                 if(child.isMesh && child !== tempCapMesh && !objectGroup.children.includes(child) && !bladeGroup.children[0].children.includes(child) && child.geometry.type === 'PlaneGeometry' && child.material.color.getHex() === currentCapColor) {
+                    scene.remove(child);
+                 }
+            });
+            // scene에 직접 추가된 영구 캡들을 찾아서 지우는 로직이 좀 복잡할 수 있으니
+            // 간단히 scene 전체 순회하며 제거 (Grid, Lights 제외)
+            const toRemove = [];
+            scene.traverse(o => {
+                if(o.isMesh && o.geometry.type === 'PlaneGeometry' && o !== tempCapMesh && o.parent === scene) {
+                    // floor 제외 확인 (floor는 ShadowMaterial)
+                    if(o.material.type === 'MeshStandardMaterial') toRemove.push(o);
+                }
+            });
+            toRemove.forEach(o => { scene.remove(o); if(o.geometry) o.geometry.dispose(); });
+
             updateSolidShape(type);
             closeAllMenus();
         };
@@ -569,9 +590,8 @@
             toggleActiveMode(btnRotate, btnTranslate); 
         });
 
-
         // ----------------------------------------------------
-        // [CUT Logic] with Physics Effects
+        // [CUT Logic] Multi-Slice
         // ----------------------------------------------------
         btnCut.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -579,27 +599,17 @@
             isAnimating = true;
             transformControl.detach(); 
 
-            // 1. 계산
-            const bladeNormal = new THREE.Vector3(0, -1, 0)
-                .applyQuaternion(bladeGroup.quaternion)
-                .normalize();
+            // 벡터 계산
+            const bladeNormal = new THREE.Vector3(0, -1, 0).applyQuaternion(bladeGroup.quaternion).normalize();
             const worldDown = new THREE.Vector3(0, -1, 0); 
-            
             const dot = worldDown.dot(bladeNormal);
             let cutDirection = worldDown.clone().sub(bladeNormal.clone().multiplyScalar(dot));
-
             if (cutDirection.lengthSq() < 0.0001) cutDirection.set(0, -1, 0); 
             else cutDirection.normalize();
 
-            // 2. 타겟 위치
-            const windUpDist = 3;  
-            const cutDist = 20;    
-
             const startPos = bladeGroup.position.clone();
-            const windUpPos = startPos.clone().add(cutDirection.clone().multiplyScalar(-windUpDist));
-            const chopPos = startPos.clone().add(cutDirection.clone().multiplyScalar(cutDist));
-
-            // [효과 위치] 칼이 도형의 대략적 중심(0, 3.5, 0)을 지나갈 때 이펙트 발생
+            const windUpPos = startPos.clone().add(cutDirection.clone().multiplyScalar(-3));
+            const chopPos = startPos.clone().add(cutDirection.clone().multiplyScalar(20));
             const impactPos = startPos.clone().add(cutDirection.clone().multiplyScalar(2));
 
             const tl = gsap.timeline({
@@ -611,38 +621,35 @@
 
             // Step A: Wind Up
             tl.to(bladeGroup.position, {
-                x: windUpPos.x,
-                y: windUpPos.y,
-                z: windUpPos.z,
-                duration: 0.2, 
-                ease: "power2.out",
-                onUpdate: syncClippingPlaneToBlade 
+                x: windUpPos.x, y: windUpPos.y, z: windUpPos.z,
+                duration: 0.2, ease: "power2.out",
+                onUpdate: syncPreviewPlaneToBlade 
             });
 
-            // Step B: Chop Down (물리 효과 트리거 포함)
+            // Step B: Chop Down
             tl.to(bladeGroup.position, {
-                x: chopPos.x,
-                y: chopPos.y,
-                z: chopPos.z,
-                duration: 0.5, // 속도감 있게 더 빠르게
-                ease: "power1.in", 
-                onUpdate: syncClippingPlaneToBlade,
+                x: chopPos.x, y: chopPos.y, z: chopPos.z,
+                duration: 0.5, ease: "power1.in", 
+                onUpdate: syncPreviewPlaneToBlade,
                 onStart: () => {
-                    // 칼이 내려가기 시작하고 아주 조금 뒤에 이펙트 터짐 (타이밍 조절)
-                    setTimeout(() => {
-                        triggerPhysicsExplosion(impactPos, bladeNormal);
-                    }, 150);
+                    setTimeout(() => triggerPhysicsExplosion(impactPos, bladeNormal), 150);
+                },
+                // [중요] 내려치기가 끝나는 순간(도형을 통과한 순간), 현재 컷을 확정함
+                onComplete: () => {
+                    commitCut(); 
+                    // 컷 확정 후에는 tempPlane이 의미가 없어지거나 초기화되어야 함
+                    // 하지만 복귀 동작에서 칼이 다시 올라오면서 또 잘리는 것처럼 보이면 이상함.
+                    // 따라서 복귀 중에는 tempPlane을 비활성화(멀리 보냄)
+                    tempPlane.constant = 10000; 
+                    tempCapMesh.visible = false;
                 }
             });
 
-            // Step C: Return (제자리로 복귀)
+            // Step C: Return
             tl.to(bladeGroup.position, {
-                x: startPos.x,
-                y: startPos.y,
-                z: startPos.z,
-                duration: 0.6,
-                ease: "power2.out",
-                onUpdate: syncClippingPlaneToBlade 
+                x: startPos.x, y: startPos.y, z: startPos.z,
+                duration: 0.6, ease: "power2.out",
+                // 복귀 중에는 미리보기 업데이트 하지 않음 (이미 잘렸으니까)
             });
         });
 
@@ -655,8 +662,6 @@
             gsap.killTweensOf(bladeGroup.position);
             gsap.killTweensOf(bladeGroup.rotation);
             gsap.killTweensOf(camera.position);
-            
-            // 파편 초기화
             if(debrisGroup) debrisGroup.children.forEach(c => c.visible = false);
 
             isAnimating = false;
@@ -664,25 +669,27 @@
             bladeGroup.position.copy(INITIAL_BLADE_POS);
             bladeGroup.quaternion.copy(INITIAL_BLADE_QUAT);
             
-            currentShapeType = 'cone';
-            currentShapeColor = 0x06b6d4;
-            currentCapColor = 0xf43f5e;
-            updateSolidShape('cone');
+            // 모든 영구 캡 제거
+            const toRemove = [];
+            scene.traverse(o => {
+                if(o.isMesh && o.geometry.type === 'PlaneGeometry' && o !== tempCapMesh && o.parent === scene) {
+                    if(o.material && o.material.type === 'MeshStandardMaterial') toRemove.push(o);
+                }
+            });
+            toRemove.forEach(o => scene.remove(o));
+
+            updateSolidShape(currentShapeType); // 초기화
 
             gsap.to(camera.position, {
-                x: INITIAL_CAMERA_POS.x,
-                y: INITIAL_CAMERA_POS.y,
-                z: INITIAL_CAMERA_POS.z,
-                duration: 1.0,
-                ease: "power2.inOut",
-                onUpdate: () => camera.lookAt(0,0,0)
+                x: INITIAL_CAMERA_POS.x, y: INITIAL_CAMERA_POS.y, z: INITIAL_CAMERA_POS.z,
+                duration: 1.0, ease: "power2.inOut", onUpdate: () => camera.lookAt(0,0,0)
             });
 
             transformControl.attach(bladeGroup);
             transformControl.setMode('translate');
             toggleActiveMode(btnTranslate, btnRotate);
             
-            syncClippingPlaneToBlade();
+            syncPreviewPlaneToBlade();
         });
 
         // AI Logic
@@ -710,13 +717,12 @@
             
             const prompt = `
                 Math Teacher Persona. Korean Language.
-                [Context] 3D Slicing App.
+                [Context] 3D Slicing App. Multi-slice mode active.
+                [Cuts Made] ${activePlanes.length} cuts.
                 [Shape] ${currentShapeType}
                 [Blade] Pos: ${bladeGroup.position.toArray().map(v=>v.toFixed(1))}, Rot: ${bladeGroup.rotation.toArray().map(v=>(v*180/Math.PI).toFixed(0))}
-                [Color] Main: ${new THREE.Color(currentShapeColor).getHexString()}, Inside: ${new THREE.Color(currentCapColor).getHexString()}
                 
-                Analyze the geometric cross-section formed by this cut. 
-                Keep it fun and educational.
+                Explain what happens geometrically when we slice an object multiple times.
             `;
 
             const result = await callGemini(prompt);
