@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Realistic Slice</title>
+    <title>Realistic Slice with Physics</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
@@ -92,13 +92,10 @@
 </head>
 <body>
 
-    <!-- 3D Canvas -->
     <div id="canvas-container"></div>
 
-    <!-- 1. Top Left Controls (Menus) -->
     <div class="fixed top-0 left-0 p-5 flex gap-3 pointer-events-none z-50 items-start">
         
-        <!-- Shape Menu -->
         <div class="relative pointer-events-auto">
             <button id="btn-shape-toggle" class="glass-btn w-12 h-12 rounded-2xl flex items-center justify-center">
                 <i id="current-shape-icon" class="fas fa-shapes"></i>
@@ -113,7 +110,6 @@
             </div>
         </div>
 
-        <!-- Color Menu -->
         <div class="relative pointer-events-auto">
             <button id="btn-color-toggle" class="glass-btn w-12 h-12 rounded-2xl flex items-center justify-center">
                 <i class="fas fa-palette"></i>
@@ -130,13 +126,11 @@
             </div>
         </div>
 
-        <!-- AI Button -->
         <button id="btn-ai" class="pointer-events-auto glass-btn w-12 h-12 rounded-2xl flex items-center justify-center hover:text-purple-400">
             <i class="fas fa-brain"></i>
         </button>
     </div>
 
-    <!-- 2. Top Right Controls (RESET) -->
     <div class="fixed top-0 right-0 p-5 z-50">
         <button id="btn-reset" class="pointer-events-auto btn-reset w-14 h-14 rounded-2xl flex flex-col items-center justify-center font-bold text-[10px] shadow-xl border border-white/20 active:scale-95 transition-transform">
             <i class="fas fa-redo text-lg mb-0.5"></i>
@@ -144,10 +138,8 @@
         </button>
     </div>
 
-    <!-- 3. Bottom Controls (Gizmo + CUT) -->
     <div class="fixed bottom-10 left-0 right-0 z-50 flex justify-center items-center gap-6 pointer-events-none pb-4">
         
-        <!-- Gizmo Toggle -->
         <div class="pointer-events-auto bg-black/40 backdrop-blur-md rounded-full p-1.5 flex border border-white/10 shadow-xl">
             <button id="btn-mode-translate" class="active-mode w-12 h-12 rounded-full flex items-center justify-center transition-all">
                 <i class="fas fa-arrows-alt"></i>
@@ -157,7 +149,6 @@
             </button>
         </div>
 
-        <!-- Cut Button (Center) -->
         <button id="btn-cut" class="pointer-events-auto btn-cut w-24 h-24 rounded-3xl rotate-3 flex flex-col items-center justify-center font-black text-sm shadow-2xl border border-white/20 active:scale-95 transition-transform hover:rotate-0 group">
             <i class="fas fa-cut text-3xl mb-1 group-hover:scale-110 transition-transform"></i>
             CUT
@@ -165,7 +156,6 @@
 
     </div>
 
-    <!-- AI Modal -->
     <div id="ai-modal" class="hidden fixed inset-0 z-[70] flex items-end sm:items-center justify-center pointer-events-none bg-black/60 backdrop-blur-sm">
         <div class="bg-slate-900 text-white w-full sm:w-96 max-h-[80vh] sm:rounded-2xl rounded-t-2xl shadow-2xl border border-slate-700 flex flex-col pointer-events-auto transform transition-transform duration-300 translate-y-full">
             <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-800/50 rounded-t-2xl">
@@ -176,7 +166,6 @@
         </div>
     </div>
 
-    <!-- Loading -->
     <div id="loading-overlay" class="hidden fixed inset-0 bg-black/80 z-[80] flex flex-col items-center justify-center text-white backdrop-blur-sm">
         <div class="animate-spin rounded-full h-12 w-12 border-4 border-t-cyan-500 border-slate-700 mb-4"></div>
         <p class="text-sm font-bold animate-pulse text-cyan-400 tracking-widest">GEMINI IS THINKING...</p>
@@ -191,11 +180,11 @@
         const apiKey = ""; 
         
         let scene, camera, renderer, orbitControls, transformControl;
-        let objectGroup, bladeGroup;
+        let objectGroup, bladeGroup, debrisGroup;
         let clipPlane, capMesh;
         
         // 상태 변수
-        let isAnimating = false; // 자르기 애니메이션 중인지 여부
+        let isAnimating = false;
         let currentShapeType = 'cone';
         let currentShapeColor = 0x06b6d4;
         let currentCapColor = 0xf43f5e;
@@ -203,7 +192,7 @@
         // 초기 설정값 상수
         const INITIAL_CAMERA_POS = new THREE.Vector3(0, 12, 20);
         const INITIAL_BLADE_POS = new THREE.Vector3(0, 9, 0);
-        const INITIAL_BLADE_QUAT = new THREE.Quaternion(); // Identity
+        const INITIAL_BLADE_QUAT = new THREE.Quaternion(); 
 
         init();
         animate();
@@ -235,12 +224,16 @@
             rimLight.position.set(-10, 10, -10);
             scene.add(rimLight);
 
-            // [핵심] Clipping Plane 초기화 - 칼의 초기 위치에 맞게 설정 (미리보기 활성화)
+            // Clipping Plane
             clipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
             
             objectGroup = new THREE.Group();
             objectGroup.position.y = 3.5; 
             scene.add(objectGroup);
+            
+            // [추가] 파편 그룹 생성
+            createDebrisPool();
+
             updateSolidShape('cone');
 
             createBlade();
@@ -252,8 +245,6 @@
 
             transformControl = new THREE.TransformControls(camera, renderer.domElement);
             transformControl.addEventListener('change', () => renderer.render(scene, camera));
-            
-            // 드래그 중에도 카메라 컨트롤 끄고 켜기
             transformControl.addEventListener('dragging-changed', (event) => {
                 orbitControls.enabled = !event.value;
             });
@@ -262,13 +253,11 @@
             transformControl.attach(bladeGroup);
             scene.add(transformControl);
             
-            // [중요] 칼을 움직일 때(change 이벤트) 실시간으로 클리핑 단면 업데이트
             transformControl.addEventListener('change', syncClippingPlaneToBlade);
 
             window.addEventListener('resize', onWindowResize);
             window.addEventListener('keydown', onKeyDown);
             
-            // 초기 동기화
             syncClippingPlaneToBlade();
         }
 
@@ -287,6 +276,7 @@
         }
 
         function updateSolidShape(type) {
+            // 기존 도형 제거
             while(objectGroup.children.length > 0){ 
                 const child = objectGroup.children[0];
                 if(child.geometry) child.geometry.dispose();
@@ -325,6 +315,10 @@
                 capMesh.quaternion.copy(bladeGroup.quaternion);
             }
             scene.add(capMesh);
+            
+            // [추가] 파편 색상 업데이트
+            updateDebrisColor();
+            
             syncClippingPlaneToBlade();
         }
 
@@ -369,7 +363,104 @@
             scene.add(floor);
         }
 
-        // [핵심] 클리핑 평면과 칼날 동기화
+        // [물리 효과 1] 파편 풀 생성
+        function createDebrisPool() {
+            debrisGroup = new THREE.Group();
+            scene.add(debrisGroup);
+            
+            const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            // 초기 재질은 임시
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+            for(let i=0; i<25; i++) {
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.visible = false;
+                debrisGroup.add(mesh);
+            }
+        }
+
+        // [물리 효과 2] 파편 색상 동기화
+        function updateDebrisColor() {
+            if(!debrisGroup) return;
+            debrisGroup.children.forEach(child => {
+                child.material = new THREE.MeshStandardMaterial({
+                    color: currentShapeColor,
+                    emissive: new THREE.Color(currentCapColor),
+                    roughness: 0.2,
+                    metalness: 0.5
+                });
+            });
+        }
+
+        // [물리 효과 3] 폭발 이펙트 트리거
+        function triggerPhysicsExplosion(position, bladeNormal) {
+            // 1. 카메라 쉐이크
+            gsap.to(camera.position, {
+                x: "+=0.3", y: "+=0.3", 
+                duration: 0.05, 
+                yoyo: true, 
+                repeat: 5,
+                onComplete: () => {
+                    // 원래 위치로 부드럽게 복귀 (살짝 틀어질 수 있으므로)
+                    // orbitControls가 잡아주므로 크게 상관 없지만 안전장치
+                }
+            });
+
+            // 2. 파편 튀기기
+            debrisGroup.children.forEach((mesh, i) => {
+                mesh.visible = true;
+                mesh.scale.set(1,1,1);
+                mesh.position.copy(position);
+                
+                // 랜덤 확산 위치 (칼날 평면 위주로)
+                const randomOffset = new THREE.Vector3(
+                    (Math.random() - 0.5) * 4,
+                    (Math.random() - 0.5) * 2,
+                    (Math.random() - 0.5) * 4
+                );
+                
+                // 중력 효과 흉내
+                const targetPos = position.clone().add(randomOffset);
+                const dropY = -5 - Math.random() * 5;
+
+                // 회전 랜덤
+                const randomRot = {
+                    x: Math.random() * Math.PI * 4,
+                    y: Math.random() * Math.PI * 4
+                };
+
+                const tl = gsap.timeline();
+                
+                // 팍 튀었다가
+                tl.to(mesh.position, {
+                    x: targetPos.x,
+                    y: targetPos.y + 2, // 살짝 위로 솟구침
+                    z: targetPos.z,
+                    duration: 0.3,
+                    ease: "power2.out"
+                })
+                // 아래로 떨어지며 사라짐
+                .to(mesh.position, {
+                    y: dropY,
+                    duration: 0.8,
+                    ease: "bounce.out" // 바닥에 튕기는 느낌
+                }, "-=0.1")
+                .to(mesh.scale, {
+                    x: 0, y: 0, z: 0,
+                    duration: 0.5
+                }, "-=0.8");
+
+                // 회전 애니메이션
+                gsap.to(mesh.rotation, {
+                    x: randomRot.x,
+                    y: randomRot.y,
+                    duration: 1.0,
+                    ease: "none"
+                });
+            });
+        }
+
+
         function syncClippingPlaneToBlade() {
             if (!bladeGroup || !clipPlane || !capMesh) return;
             bladeGroup.updateMatrixWorld();
@@ -379,7 +470,7 @@
             const constant = -point.dot(normal);
             
             clipPlane.normal.copy(normal);
-            clipPlane.constant = constant; // 이 시점에 Plane이 칼 위치로 이동 -> 잘림
+            clipPlane.constant = constant; 
             
             capMesh.visible = true; 
             capMesh.position.copy(point);
@@ -480,45 +571,45 @@
 
 
         // ----------------------------------------------------
-        // [CUT Logic] 
+        // [CUT Logic] with Physics Effects
         // ----------------------------------------------------
         btnCut.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (isAnimating) return; // 애니메이션 중복 실행 방지
+            if (isAnimating) return; 
             isAnimating = true;
-            transformControl.detach(); // 조작기 떼기
+            transformControl.detach(); 
 
-            // 1. 미끄러짐(자르기) 벡터 계산
-            // 칼의 평면(Normal)에 수직이 아닌, 평면을 '타고 내려가는' 벡터를 구함
+            // 1. 계산
             const bladeNormal = new THREE.Vector3(0, -1, 0)
                 .applyQuaternion(bladeGroup.quaternion)
                 .normalize();
-            const worldDown = new THREE.Vector3(0, -1, 0); // 중력 방향
+            const worldDown = new THREE.Vector3(0, -1, 0); 
             
-            // worldDown 벡터를 bladeNormal 평면에 투영
             const dot = worldDown.dot(bladeNormal);
             let cutDirection = worldDown.clone().sub(bladeNormal.clone().multiplyScalar(dot));
 
-            // 만약 칼이 완전 수평이라서 투영 벡터가 0이면(그냥 누르는 거라면), 그냥 아래로
             if (cutDirection.lengthSq() < 0.0001) cutDirection.set(0, -1, 0); 
             else cutDirection.normalize();
 
-            // 2. 타겟 위치 설정
+            // 2. 타겟 위치
             const windUpDist = 3;  
             const cutDist = 20;    
 
-            const startPos = bladeGroup.position.clone(); // 원래 위치 기억
+            const startPos = bladeGroup.position.clone();
             const windUpPos = startPos.clone().add(cutDirection.clone().multiplyScalar(-windUpDist));
             const chopPos = startPos.clone().add(cutDirection.clone().multiplyScalar(cutDist));
+
+            // [효과 위치] 칼이 도형의 대략적 중심(0, 3.5, 0)을 지나갈 때 이펙트 발생
+            const impactPos = startPos.clone().add(cutDirection.clone().multiplyScalar(2));
 
             const tl = gsap.timeline({
                 onComplete: () => {
                     isAnimating = false;
-                    transformControl.attach(bladeGroup); // 애니메이션 끝나면 바로 다시 조작 가능
+                    transformControl.attach(bladeGroup); 
                 }
             });
 
-            // Step A: Wind Up (살짝 들어올리기)
+            // Step A: Wind Up
             tl.to(bladeGroup.position, {
                 x: windUpPos.x,
                 y: windUpPos.y,
@@ -528,29 +619,35 @@
                 onUpdate: syncClippingPlaneToBlade 
             });
 
-            // Step B: Chop Down (내려치며 자르기)
+            // Step B: Chop Down (물리 효과 트리거 포함)
             tl.to(bladeGroup.position, {
                 x: chopPos.x,
                 y: chopPos.y,
                 z: chopPos.z,
-                duration: 0.6, 
-                ease: "power2.in", 
-                onUpdate: syncClippingPlaneToBlade 
+                duration: 0.5, // 속도감 있게 더 빠르게
+                ease: "power1.in", 
+                onUpdate: syncClippingPlaneToBlade,
+                onStart: () => {
+                    // 칼이 내려가기 시작하고 아주 조금 뒤에 이펙트 터짐 (타이밍 조절)
+                    setTimeout(() => {
+                        triggerPhysicsExplosion(impactPos, bladeNormal);
+                    }, 150);
+                }
             });
 
-            // Step C: Return (원래 위치로 복귀) - 추가된 부분
+            // Step C: Return (제자리로 복귀)
             tl.to(bladeGroup.position, {
                 x: startPos.x,
                 y: startPos.y,
                 z: startPos.z,
                 duration: 0.6,
                 ease: "power2.out",
-                onUpdate: syncClippingPlaneToBlade // 돌아올 때도 단면이 따라와야 자연스러움
+                onUpdate: syncClippingPlaneToBlade 
             });
         });
 
         // ----------------------------------------------------
-        // [RESET Logic] Hard Reset
+        // [RESET Logic]
         // ----------------------------------------------------
         btnReset.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -558,10 +655,12 @@
             gsap.killTweensOf(bladeGroup.position);
             gsap.killTweensOf(bladeGroup.rotation);
             gsap.killTweensOf(camera.position);
+            
+            // 파편 초기화
+            if(debrisGroup) debrisGroup.children.forEach(c => c.visible = false);
 
             isAnimating = false;
             
-            // 모든 상태 초기화
             bladeGroup.position.copy(INITIAL_BLADE_POS);
             bladeGroup.quaternion.copy(INITIAL_BLADE_QUAT);
             
@@ -583,7 +682,6 @@
             transformControl.setMode('translate');
             toggleActiveMode(btnTranslate, btnRotate);
             
-            // 리셋 후 동기화
             syncClippingPlaneToBlade();
         });
 
