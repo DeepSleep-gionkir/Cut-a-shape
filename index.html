@@ -496,7 +496,6 @@
             const worldDown = new THREE.Vector3(0, -1, 0); // 중력 방향
             
             // worldDown 벡터를 bladeNormal 평면에 투영
-            // 공식: V_proj = V - (V · N) * N
             const dot = worldDown.dot(bladeNormal);
             let cutDirection = worldDown.clone().sub(bladeNormal.clone().multiplyScalar(dot));
 
@@ -505,10 +504,10 @@
             else cutDirection.normalize();
 
             // 2. 타겟 위치 설정
-            const windUpDist = 5;  
-            const cutDist = 18;    
+            const windUpDist = 3;  
+            const cutDist = 20;    
 
-            const startPos = bladeGroup.position.clone();
+            const startPos = bladeGroup.position.clone(); // 원래 위치 기억
             const windUpPos = startPos.clone().add(cutDirection.clone().multiplyScalar(-windUpDist));
             const chopPos = startPos.clone().add(cutDirection.clone().multiplyScalar(cutDist));
 
@@ -519,9 +518,7 @@
                 }
             });
 
-            // Step A: Wind Up (들어올리기)
-            // 이때도 syncClippingPlaneToBlade를 호출해야 함. 
-            // 왜냐? 칼이 올라가면, 잘렸던 부분이 다시 '생겨나야' 하니까 (미리보기니까)
+            // Step A: Wind Up (살짝 들어올리기)
             tl.to(bladeGroup.position, {
                 x: windUpPos.x,
                 y: windUpPos.y,
@@ -531,16 +528,24 @@
                 onUpdate: syncClippingPlaneToBlade 
             });
 
-            // Step B: Chop Down (내려치기)
-            // 여기서 천천히 내려가면서 syncClippingPlaneToBlade가 매 프레임 호출됨
-            // => 칼날의 위치에 따라 도형이 스르륵 잘려나가는 효과가 완성됨
+            // Step B: Chop Down (내려치며 자르기)
             tl.to(bladeGroup.position, {
                 x: chopPos.x,
                 y: chopPos.y,
                 z: chopPos.z,
-                duration: 0.8, // 충분히 느리게 하여 잘리는 과정 보여줌
+                duration: 0.6, 
                 ease: "power2.in", 
                 onUpdate: syncClippingPlaneToBlade 
+            });
+
+            // Step C: Return (원래 위치로 복귀) - 추가된 부분
+            tl.to(bladeGroup.position, {
+                x: startPos.x,
+                y: startPos.y,
+                z: startPos.z,
+                duration: 0.6,
+                ease: "power2.out",
+                onUpdate: syncClippingPlaneToBlade // 돌아올 때도 단면이 따라와야 자연스러움
             });
         });
 
